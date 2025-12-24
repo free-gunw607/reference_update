@@ -1,0 +1,26 @@
+name: DocPool Update Bot
+
+on:
+  schedule:
+    # 매일 아침 8시 (한국시간) = UTC 23:00 (전날)
+    - cron: '0 23 * * *'
+  workflow_dispatch: # 수동 실행 버튼
+
+jobs:
+  run_docpool:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+        
+      - name: Run DocPool Bot
+        env:
+          # 구글 시트 키는 기존 Secret 재사용
+          GDRIVE_CREDS: ${{ secrets.GDRIVE_CREDS }}
+        run: python docpool_bot.py
