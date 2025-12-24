@@ -19,7 +19,7 @@ GSHEET_ID = "19Q3KNbFu0ftr2hAqEdNwhf_UQvYXiXa2Vvk8lv9S6JY"
 GSHEET_TAB = "<데이터>소중한추억"
 TZ_NAME = "Asia/Seoul"
 
-# 로컬 코드처럼 넉넉하게 설정 (최대 10000개까지 스캔)
+# [핵심] 로컬 코드처럼 최대 10,000개까지 넉넉하게 수집
 ITER_LIMIT = 10000 
 
 # 알림용 토큰 로드
@@ -30,14 +30,77 @@ except:
     TELEGRAM_TOKEN = None
     MY_CHAT_ID = None
 
-# 정규식
+# 정규식 (로컬 코드와 동일)
 URL_RE = re.compile(r'https?://\S+', re.I)
 PDF_URL_RE = re.compile(r'https?://\S+\.pdf(\b|$)', re.I)
 ID_RE = re.compile(r'(\d+)(?=(?:\.pdf\b|/?$))')
 LEADING_JUNK = re.compile(r'^[\u200B-\u200F\u202A-\u202E\u2060-\u2069\ufeff\s\r\n\t]+', re.S)
 
 # =========================================================
-# [기능 1] 중복 제거 로직 (내용 기반)
+# [기능 1] 텔레그램 스마트 알림 (꽉 채워서 보내기)
+# =========================================================
+def send_telegram_smart(new_rows):
+    if not TELEGRAM_TOKEN or not MY_CHAT_ID:
+        return
+
+    # 텔레그램 메시지 한계 (안전하게 4000자)
+    MAX_LENGTH = 4000
+    
+    total_count = len(new_rows)
+    header = f"📚 <b>[소중한추억] 업데이트 완료</b>\n신규 리포트: {total_count}건\n{'='*20}\n\n"
+    
+    current_msg = header
+    
+    # 리스트 순회
+    for idx, row in enumerate(new_rows, 1):
+        # row: [date, "", message, links]
+        date_str = row[0]
+        title = row[2]
+        links_str = row[3]
+
+        # 제목 HTML 이스케이프 및 길이 제한
+        clean_title = title.replace("<", "&lt;").replace(">", "&gt;") 
+        if len(clean_title) > 35: 
+            clean_title = clean_title[:35] + "..."
+            
+        # 첫 번째 링크 추출
+        target_link = ""
+        if links_str:
+            first_link = links_str.split(',')[0].strip()
+            if first_link.startswith("http"):
+                target_link = first_link
+        
+        # 한 줄 생성
+        if target_link:
+            line = f"{idx}. [{date_str}] <a href='{target_link}'>{clean_title}</a>\n"
+        else:
+            line = f"{idx}. [{date_str}] {clean_title}\n"
+            
+        # [스마트 분할 로직]
+        # 현재 메시지에 이 줄을 더했을 때 4000자가 넘으면 -> 발송 후 초기화
+        if len(current_msg) + len(line) > MAX_LENGTH:
+            _send_chunk(current_msg)
+            # 다음 메시지 헤더 (이어짐 표시)
+            current_msg = f"📚 <b>[이어짐] ({idx}번부터~)</b>\n\n" + line
+        else:
+            current_msg += line
+            
+    # 반복문이 끝나고 남은 내용이 있으면 발송
+    if current_msg:
+        _send_chunk(current_msg)
+
+def _send_chunk(text):
+    """실제 전송 함수"""
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        r = requests.post(url, data={'chat_id': MY_CHAT_ID, 'text': text, 'parse_mode': 'HTML'})
+        # 순서 꼬임 방지 딜레이
+        time.sleep(1)
+    except Exception as e:
+        print(f"❌ 전송 실패: {e}")
+
+# =========================================================
+# [기능 2] 중복 제거 로직 (로컬 코드 완벽 이식)
 # =========================================================
 def normalize_for_dedup(msg_text: str) -> str:
     if not msg_text: return ""
@@ -48,79 +111,15 @@ def normalize_for_dedup(msg_text: str) -> str:
     return s
 
 def dedup_insert(row_dict, row):
+    # 키: (날짜, 정규화된 내용) -> 내용이 같으면 같은 리포트로 취급
     key = (row["date"], normalize_for_dedup(row["message"]))
     prev = row_dict.get(key)
+    # 기존에 없거나, 현재 ID가 더 작으면(원본에 가까우면) 업데이트
     if (prev is None) or (row["msg_id"] < prev["msg_id"]):
         row_dict[key] = row
 
 # =========================================================
-# [기능 2] 텔레그램 알림 (스마트 꽉 채우기 전송)
-# =========================================================
-def send_telegram_alert(new_rows):
-    if not TELEGRAM_TOKEN or not MY_CHAT_ID:
-        return
-
-    # 텔레그램 메시지 최대 길이 (안전하게 4000자로 설정)
-    MAX_LENGTH = 4000
-    
-    total_count = len(new_rows)
-    
-    # 첫 번째 메시지 헤더
-    header = f"📚 <b>[소중한추억] 업데이트 완료</b>\n신규 리포트: {total_count}건\n{'='*20}\n\n"
-    
-    current_msg = header
-    msg_count = 1
-
-    for idx, row in enumerate(new_rows, 1):
-        # 1. 한 줄 내용 만들기
-        date_str = row[0] if len(row) > 0 else ""
-        title = row[2] if len(row) > 2 else "제목 없음"
-        links_str = row[3] if len(row) > 3 else ""
-        
-        clean_title = title.replace("<", "&lt;").replace(">", "&gt;") 
-        if len(clean_title) > 35: clean_title = clean_title[:35] + "..."
-            
-        target_link = ""
-        if links_str:
-            first_link = links_str.split(',')[0].strip()
-            if first_link.startswith("http"): target_link = first_link
-        
-        if target_link:
-            line = f"{idx}. [{date_str}] <a href='{target_link}'>{clean_title}</a>\n"
-        else:
-            line = f"{idx}. [{date_str}] {clean_title}\n"
-            
-        # 2. 길이 체크 (현재 메시지 + 새 줄 > 4000자?)
-        if len(current_msg) + len(line) > MAX_LENGTH:
-            # 꽉 찼으면 바로 전송
-            _send_chunk(current_msg)
-            msg_count += 1
-            
-            # 다음 메시지 준비 (헤더는 '이어짐'으로 변경)
-            current_msg = f"📚 <b>[이어짐] ({idx}번 부터~)</b>\n\n" + line
-        else:
-            # 아직 여유 있으면 추가
-            current_msg += line
-            
-    # 반복문 끝나고 남은 내용 전송
-    if current_msg:
-        _send_chunk(current_msg)
-
-def _send_chunk(text):
-    """실제 전송을 담당하는 내부 함수"""
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        r = requests.post(url, data={'chat_id': MY_CHAT_ID, 'text': text, 'parse_mode': 'HTML'})
-        if r.status_code != 200:
-            print(f"❌ 텔레그램 전송 실패: {r.text}")
-        else:
-            print("✅ 텔레그램 메시지 발송 완료")
-        time.sleep(1) # 순서 꼬임 방지
-    except Exception as e:
-        print(f"❌ 연결 에러: {e}")
-
-# =========================================================
-# [기능 3] 구글 시트 유틸 (전체 ID 스캔 + 빈 행 무시)
+# [기능 3] 구글 시트 유틸 (빈 행 무시 + 전체 ID 스캔)
 # =========================================================
 def get_gsheet_client():
     if 'GDRIVE_CREDS' not in os.environ:
@@ -139,13 +138,16 @@ def extract_report_ids_from_text(text):
         if m: ids.add(int(m.group(1)))
     return ids
 
+# [핵심] 실제 데이터가 있는 마지막 줄 번호 찾기
 def find_last_data_row(vals):
     last = 0
     for idx, row in enumerate(vals, start=1):
+        # A~D열 중 하나라도 값이 있으면 데이터로 간주
         if any((c or "").strip() for c in row[:4]):
             last = idx
     return last
 
+# 시트의 모든 ID와 마지막 줄 번호를 한 번에 파악
 def fetch_sheet_info(ws):
     try:
         vals = ws.get_all_values()
@@ -162,9 +164,7 @@ def fetch_sheet_info(ws):
                 if ids:
                     existing_ids.update(ids)
                     max_id = max(max_id, max(ids))
-                    
         return max_id, existing_ids, last_row_idx
-        
     except Exception as e:
         print(f"⚠️ 시트 읽기 실패: {e}")
         return 0, set(), 0
@@ -214,6 +214,7 @@ def is_pdf_message(msg_text, urls, msg):
 async def main():
     print("🚀 [소중한추억] 업데이트 봇 가동 (최종)...")
     
+    # 1. 시트 접속
     try:
         gc = get_gsheet_client()
         ws = gc.open_by_key(GSHEET_ID).worksheet(GSHEET_TAB)
@@ -221,17 +222,20 @@ async def main():
         print(f"❌ 구글 시트 에러: {e}")
         return
 
+    # 2. 시트 정보 로드 (중복 방지 & 이어쓰기 위치 확인)
     last_id, existing_ids, last_row_num = fetch_sheet_info(ws)
     print(f"📊 시트 상태: Max ID={last_id}, 총 데이터={len(existing_ids)}건, 마지막 줄={last_row_num}")
 
+    # 3. 텔레그램 접속
     client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
     await client.connect()
     
     entity = await client.get_entity(CHANNEL_URL)
-    rows_dict = {}
+    rows_dict = {} # 중복 제거용 딕셔너리
     
-    print(f"🔍 스캔 시작 (기준 ID > {last_id})...")
+    print(f"🔍 스캔 시작 (기준 ID > {last_id}, 최대 {ITER_LIMIT}개)...")
     
+    # 4. 수집 (ITER_LIMIT=10000개까지)
     async for msg in client.iter_messages(entity, min_id=last_id, limit=ITER_LIMIT, reverse=True):
         text = normalize_leading(msg.message)
         urls = extract_all_urls(text, msg.entities, msg)
@@ -250,6 +254,7 @@ async def main():
         kst_dt = msg.date.astimezone(ZoneInfo(TZ_NAME))
         date_str = kst_dt.strftime("%Y-%m-%d")
         
+        # [중요] 이미 시트에 있는 ID는 절대 가져오지 않음
         if msg.id in existing_ids:
             continue
 
@@ -260,6 +265,7 @@ async def main():
             "links": links,
         }
         
+        # [중요] 내용 기반 정밀 중복 제거 (로컬 코드 로직)
         dedup_insert(rows_dict, row)
         
         if len(rows_dict) % 50 == 0:
@@ -267,8 +273,10 @@ async def main():
 
     await client.disconnect()
     
+    # 5. 데이터 정렬 (날짜 -> ID순)
     sorted_rows = sorted(rows_dict.values(), key=lambda r: (r["date"], r["msg_id"]))
     
+    # 업로드 포맷 변환
     upload_data = []
     for r in sorted_rows:
         upload_data.append([r["date"], "", r["message"], r["links"]])
@@ -279,5 +287,23 @@ async def main():
 
     print(f"📤 {len(upload_data)}건 업로드 준비 중...")
     
+    # 6. 업로드 & 알림
     try:
-        next
+        # 빈 줄 건너뛰고 바로 데이터 밑에 붙이기
+        next_row = last_row_num + 1
+        end_row = next_row + len(upload_data) - 1
+        cell_range = f"A{next_row}:D{end_row}"
+        
+        ws.update(range_name=cell_range, values=upload_data, value_input_option="RAW")
+        print(f"✅ 시트 업데이트 완료! (범위: {cell_range})")
+        
+        print("🔔 텔레그램 스마트 알림 전송 중...")
+        send_telegram_smart(upload_data)
+        
+    except Exception as e:
+        print(f"❌ 처리 중 에러 발생: {e}")
+
+if __name__ == "__main__":
+    import nest_asyncio
+    nest_asyncio.apply()
+    asyncio.run(main())
