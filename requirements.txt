@@ -1,0 +1,11 @@
+gspread
+google-auth
+selenium
+beautifulsoup4
+requests
+fake-useragent
+pandas
+openpyxl
+webdriver-manager
+lxml
+telethon
