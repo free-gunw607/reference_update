@@ -1,9 +1,40 @@
 name: DocPool Update Bot
 
 on:
+  # ----------------------------------------------------------------------
+  # [⏰ 시간 설정 완전 정복 가이드]
+  #
+  # 1. 기본 규칙: (한국 시간) - 9 = (UTC 시간)
+  # 2. 분(Minute)은 그대로 적으세요. (한국 30분 = UTC 30분)
+  # 3. 시간이 섞여 있다면 '- cron' 줄을 여러 개 써도 됩니다.
+  #
+  # [작성 예시]
+  # - cron: '분 시 * * *'
+  #
+  # [공식] (한국 시간) - 9시간 = (설정할 UTC 시간)
+  #
+  # [현재 설정된 스케줄]
+  # 1. 아침 08:00 KST -> (08 - 9 = -1) -> 전날 23:00 UTC
+  # 2. 오후 13:00 KST -> (13 - 9 =  4) -> 당일 04:00 UTC
+  # 3. 오후 15:00 KST -> (15 - 9 =  6) -> 당일 06:00 UTC
+  # 4. 오후 18:00 KST -> (18 - 9 =  9) -> 당일 09:00 UTC
+  # 5. 저녁 20:00 KST -> (20 - 9 = 11) -> 당일 11:00 UTC
+  #
+  # [현재 설정된 스케줄]
+  # Group A: 정각(00분) 실행
+  # 08:00 KST (23:00 UTC) / 13:00 KST (04:00 UTC) / 15:00 KST (06:00 UTC)
+  # 18:00 KST (09:00 UTC) / 20:00 KST (11:00 UTC)
+  #
+  # (만약 08:30, 13:30을 추가하고 싶으면 아래 주석(#)을 풀고 쓰세요)
+  # ----------------------------------------------------------------------
   schedule:
-    # 매일 새벽 1시 45분 (01:45 KST)
-    - cron: '45 16 * * *'
+    # 1. 정각(00분) 타임 테이블
+    - cron: '0 4,6,9,11,23 * * *'
+    
+    # 2. 30분 타임 테이블 (필요하면 # 지우고 사용)
+    # 예: 08:30 KST(23:30 UTC), 13:30 KST(04:30 UTC)
+    # - cron: '30 4,23 * * *'
+
   workflow_dispatch:
 
 jobs:
@@ -11,6 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -21,7 +53,6 @@ jobs:
         
       - name: Run DocPool Bot
         env:
-          # 👇 이 부분들이 꼭 있어야 합니다!
           GDRIVE_CREDS: ${{ secrets.GDRIVE_CREDS }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           MY_CHAT_ID: ${{ secrets.MY_CHAT_ID }}
