@@ -15,15 +15,18 @@ API_HASH = "99c1d3f16735873c768f0580a8a6ca58"
 SESSION_STRING = "1BVtsOIgBu3Y9HkCwppiILxPqdDwi7Oea8W-GiEJAEN7bbwM3_yMholc0An7WgvDTvUDgwO1yfNLcgYzu-wIehxN7qJJFw6Qk_99gSdwxI-ICytLFNVVVPFfcddntiGTgHABh9w1ZQmf5vKQ0cnKvl88mkRf2MweGbpfvgyzDszb0dMRs0yLctB1fOOFP7m2PtAUDEqJuhmmTs4FIxiyyKBwnVf41rwXx7_Ulm7t1beHE7LnY_m2yS0s3xDtN7maBBfWcrHYA2FAHLMwCvg3l9k-z4xTbJ_SFf85wA9bErkDeM22zpiTNTeD5uwdlVLUzanH87sXVCivPCYl5BkWk9zx8yIO5O-g="
 
 CHANNEL_URL = "https://t.me/DOC_POOL"
+# 👇 여기가 님 시트 ID입니다. URL과 맞는지 확인하세요.
 GSHEET_ID = "19Q3KNbFu0ftr2hAqEdNwhf_UQvYXiXa2Vvk8lv9S6JY"
 GSHEET_TAB = "<데이터>소중한추억"
 TZ_NAME = "Asia/Seoul"
 
-# 알림용 토큰 (Secrets에서 로드)
+# 알림용 토큰 확인 (디버깅용)
 try:
-    TELEGRAM_TOKEN = os.environ['TELEGRAM_TOKEN']
-    MY_CHAT_ID = os.environ['MY_CHAT_ID']
-except KeyError:
+    TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+    MY_CHAT_ID = os.environ.get('MY_CHAT_ID')
+    print(f"🕵️ [진단] 텔레그램 토큰 존재 여부: {'있음 O' if TELEGRAM_TOKEN else '없음 X (Secrets 확인 필요)'}")
+    print(f"🕵️ [진단] 채팅 ID 존재 여부: {'있음 O' if MY_CHAT_ID else '없음 X'}")
+except:
     TELEGRAM_TOKEN = None
     MY_CHAT_ID = None
 
@@ -34,10 +37,12 @@ ID_RE = re.compile(r'(\d+)(?=(?:\.pdf\b|/?$))')
 LEADING_JUNK = re.compile(r'^[\u200B-\u200F\u202A-\u202E\u2060-\u2069\ufeff\s\r\n\t]+', re.S)
 
 # =========================================================
-# [기능 1] 알림 전송 (날짜 + 링크 포함)
+# [기능 1] 알림 전송 (디버깅 강화)
 # =========================================================
 def send_telegram_alert(new_rows):
+    print("🚀 텔레그램 전송 함수 진입")
     if not TELEGRAM_TOKEN or not MY_CHAT_ID:
+        print("❌ [중단] 토큰이나 ID가 없어서 전송하지 않습니다.")
         return
 
     count = len(new_rows)
@@ -45,30 +50,24 @@ def send_telegram_alert(new_rows):
     
     body_list = []
     for idx, row in enumerate(new_rows, 1):
-        # row 구조: [date, "", message, links]
         date_str = row[0] if len(row) > 0 else ""
         title = row[2] if len(row) > 2 else "제목 없음"
         links_str = row[3] if len(row) > 3 else ""
         
-        # 1. 제목 길이 정리
         clean_title = title.replace("<", "&lt;").replace(">", "&gt;") 
         if len(clean_title) > 35: 
             clean_title = clean_title[:35] + "..."
             
-        # 2. 링크 추출 (첫 번째 링크 사용)
         target_link = ""
         if links_str:
             first_link = links_str.split(',')[0].strip()
             if first_link.startswith("http"):
                 target_link = first_link
         
-        # 3. HTML 포맷: "번호. [날짜] 제목 (링크)"
-        # 날짜를 대괄호[]로 감싸서 잘 보이게 함
         if target_link:
             line = f"{idx}. [{date_str}] <a href='{target_link}'>{clean_title}</a>"
         else:
             line = f"{idx}. [{date_str}] {clean_title}"
-            
         body_list.append(line)
     
     msg_body = "\n".join(body_list)
@@ -80,8 +79,13 @@ def send_telegram_alert(new_rows):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
         r = requests.post(url, data={'chat_id': MY_CHAT_ID, 'text': full_text, 'parse_mode': 'HTML'})
+        print(f"📡 텔레그램 서버 응답: {r.status_code}")
+        if r.status_code != 200:
+            print(f"❌ 전송 실패 원인: {r.text}")
+        else:
+            print("✅ 텔레그램 전송 성공!")
     except Exception as e:
-        print(f"❌ 텔레그램 알림 실패: {e}")
+        print(f"❌ 텔레그램 연결 실패: {e}")
 
 # =========================================================
 # [기능 2] 구글 시트 & 파싱 유틸
@@ -142,7 +146,6 @@ def extract_all_urls(text, entities, msg):
             elif isinstance(e, MessageEntityTextUrl):
                 if getattr(e, "url", None): urls.append(e.url)
     urls.extend(URL_RE.findall(text or ""))
-    
     out, seen = [], set()
     for u in urls:
         u = u.strip().rstrip(".,);]")
@@ -163,13 +166,23 @@ def is_pdf_message(msg_text, urls, msg):
 # [메인] 실행 로직
 # =========================================================
 async def main():
-    print("🚀 [소중한추억] 업데이트 봇 가동...")
+    print("🚀 [소중한추억] 업데이트 봇 가동... (진단 모드)")
     
     try:
         gc = get_gsheet_client()
-        ws = gc.open_by_key(GSHEET_ID).worksheet(GSHEET_TAB)
+        sh = gc.open_by_key(GSHEET_ID)
+        print(f"🕵️ [진단] 접속한 시트 제목: {sh.title}")
+        
+        ws = sh.worksheet(GSHEET_TAB)
+        print(f"🕵️ [진단] 접속한 탭 이름: {ws.title}")
+        
+        # 행 개수 확인
+        all_vals = ws.get_all_values()
+        print(f"🕵️ [진단] 현재 시트의 총 행 개수(데이터+빈칸): {len(all_vals)}개")
+        
     except Exception as e:
-        print(f"❌ 구글 시트 에러: {e}")
+        print(f"❌ 구글 시트 접속 에러: {e}")
+        print("💡 힌트: 시트 ID가 틀렸거나, 봇 이메일(client_email)을 초대를 안 했을 수 있습니다.")
         return
 
     last_id = fetch_last_id_from_gsheet(ws)
@@ -204,7 +217,6 @@ async def main():
         kst_dt = msg.date.astimezone(ZoneInfo(TZ_NAME))
         date_str = kst_dt.strftime("%Y-%m-%d")
         
-        # [날짜, 빈칸, 메시지, 링크] 순서로 저장
         new_rows.append([date_str, "", body, links])
         print(f"  ✅ 수집: {msg.id}")
 
@@ -214,14 +226,17 @@ async def main():
         print("💤 업데이트 내역 없음.")
         return
 
-    print(f"📤 {len(new_rows)}건 업로드 중...")
+    print(f"📤 {len(new_rows)}건 업로드 시도 중...")
     try:
         ws.append_rows(new_rows, value_input_option="RAW")
-        print("✅ 업로드 성공!")
-        print("🔔 텔레그램 알림 전송 중...")
+        print("✅ 시트 API 호출 성공! (데이터가 들어갔어야 정상입니다)")
+        
+        # 다시 확인
+        print("🔔 텔레그램 알림 전송 시도...")
         send_telegram_alert(new_rows)
+        
     except Exception as e:
-        print(f"❌ 업로드/전송 중 에러: {e}")
+        print(f"❌ 업로드/전송 중 치명적 에러: {e}")
 
 if __name__ == "__main__":
     import nest_asyncio
