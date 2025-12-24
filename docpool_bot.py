@@ -8,17 +8,16 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # =========================================================
-# [설정] 사용자 정보 & 세션 스트링 (Embed)
+# [설정] 텔레그램 인증 정보 (코드 내장)
 # =========================================================
-# 1. 텔레그램 API 정보 (기존 파일에서 가져옴)
+# 님 API 정보
 API_ID = 23502096
 API_HASH = "99c1d3f16735873c768f0580a8a6ca58"
 
-# 2. 텔레그램 만능 열쇠 (방금 뽑은 세션 스트링)
-# 주의: 이 코드가 공개된 장소에 노출되면 다른 사람이 님 계정으로 접속할 수 있습니다.
+# 님 세션 스트링 (만능 열쇠)
 SESSION_STRING = "1BVtsOIgBu3Y9HkCwppiILxPqdDwi7Oea8W-GiEJAEN7bbwM3_yMholc0An7WgvDTvUDgwO1yfNLcgYzu-wIehxN7qJJFw6Qk_99gSdwxI-ICytLFNVVVPFfcddntiGTgHABh9w1ZQmf5vKQ0cnKvl88mkRf2MweGbpfvgyzDszb0dMRs0yLctB1fOOFP7m2PtAUDEqJuhmmTs4FIxiyyKBwnVf41rwXx7_Ulm7t1beHE7LnY_m2yS0s3xDtN7maBBfWcrHYA2FAHLMwCvg3l9k-z4xTbJ_SFf85wA9bErkDeM22zpiTNTeD5uwdlVLUzanH87sXVCivPCYl5BkWk9zx8yIO5O-g="
 
-# 3. 타겟 채널 및 시트 설정
+# 타겟 채널 및 시트 설정
 CHANNEL_URL = "https://t.me/DOC_POOL"
 GSHEET_ID = "19Q3KNbFu0ftr2hAqEdNwhf_UQvYXiXa2Vvk8lv9S6JY"
 GSHEET_TAB = "<데이터>소중한추억"
@@ -31,12 +30,12 @@ ID_RE = re.compile(r'(\d+)(?=(?:\.pdf\b|/?$))')
 
 
 # =========================================================
-# [기능] 구글 시트 연동
+# [기능 1] 구글 시트 접속 & 마지막 ID 읽기
 # =========================================================
 def get_gsheet_client():
     # GitHub Secrets에 있는 GDRIVE_CREDS 사용
     if 'GDRIVE_CREDS' not in os.environ:
-        print("❌ GDRIVE_CREDS 환경변수가 없습니다.")
+        print("❌ GDRIVE_CREDS 환경변수가 없습니다. GitHub Secrets를 확인하세요.")
         sys.exit(1)
         
     creds_dict = json.loads(os.environ['GDRIVE_CREDS'])
@@ -56,7 +55,7 @@ def extract_report_ids(text):
 def fetch_last_id_from_gsheet(ws):
     """
     시트의 D열(Links)을 훑어서 가장 큰 Report ID를 찾습니다.
-    (증분 업데이트 기준점)
+    이 ID보다 큰(최신) 메시지만 텔레그램에서 긁어옵니다.
     """
     try:
         # D열 전체 가져오기 (헤더 제외)
@@ -71,12 +70,12 @@ def fetch_last_id_from_gsheet(ws):
                 max_id = max(max_id, max(ids))
         return max_id
     except Exception as e:
-        print(f"⚠️ 시트 마지막 ID 읽기 실패: {e}")
+        print(f"⚠️ 시트 마지막 ID 읽기 실패 (0부터 시작): {e}")
         return 0
 
 
 # =========================================================
-# [기능] 링크 및 본문 추출
+# [기능 2] 텔레그램 메시지 파싱
 # =========================================================
 def extract_links_and_filter(msg):
     text = msg.message or ""
@@ -101,7 +100,7 @@ def extract_links_and_filter(msg):
     if not is_pdf:
         return None, None # PDF 관련 아니면 스킵
 
-    # 링크 정리 (중복 제거)
+    # 링크 정리 (텔레그램 링크 + 외부 링크)
     tg_link = f"https://t.me/DOC_POOL/{msg.id}"
     final_urls = [tg_link]
     seen = {tg_link}
@@ -135,16 +134,16 @@ async def main():
         print(f"❌ 구글 시트 접속 에러: {e}")
         return
 
-    # 2. 마지막 ID 확인 (여기부터 긁어옴)
+    # 2. 마지막 ID 확인 (증분 기준점)
     last_id = fetch_last_id_from_gsheet(ws)
-    print(f"📊 기준 ID (Last ID): {last_id}")
+    print(f"📊 시트의 마지막 리포트 ID: {last_id}")
 
     # 3. 텔레그램 접속 (Embed된 세션 사용)
     client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
     await client.connect()
     
     if not await client.is_user_authorized():
-        print("❌ 텔레그램 인증 실패. 세션 스트링이 만료되었거나 잘못되었습니다.")
+        print("❌ 텔레그램 인증 실패. 세션 스트링을 확인하세요.")
         return
 
     entity = await client.get_entity(CHANNEL_URL)
@@ -153,9 +152,10 @@ async def main():
     print(f"🔍 신규 메시지 스캔 중 (ID > {last_id})...")
     
     # 4. 크롤링 (최신순 -> 과거순, last_id 만나면 중단)
+    # limit=500: 한 번에 최대 500개까지만 확인 (안전장치)
     async for msg in client.iter_messages(entity, min_id=last_id, limit=500, reverse=True):
         body, links = extract_links_and_filter(msg)
-        if not links: continue # 필터 탈락
+        if not links: continue # PDF 관련 없으면 패스
         
         # 날짜 (KST 변환)
         kst_dt = msg.date.astimezone(ZoneInfo(TZ_NAME))
