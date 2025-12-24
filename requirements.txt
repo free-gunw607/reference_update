@@ -2,3 +2,4 @@ gspread
 google-auth
 telethon
 requests
+nest_asyncio
