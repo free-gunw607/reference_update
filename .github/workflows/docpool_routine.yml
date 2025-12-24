@@ -2,16 +2,9 @@ name: DocPool Update Bot
 
 on:
   schedule:
-    # -----------------------------------------------------------
-    # [⏰ UTC 시간 계산법]
-    # (한국 시간) - 9시간 = (UTC 시간)
-    #
-    # [설정] 매일 새벽 1시 45분 (01:45 KST) 실행
-    # 01:45 - 9시간 = 전날 16:45
-    # -----------------------------------------------------------
-    - cron: '40 17 * * *'
-    
-  workflow_dispatch: # 수동 실행 버튼
+    # 매일 새벽 1시 45분 (01:45 KST)
+    - cron: '45 16 * * *'
+  workflow_dispatch:
 
 jobs:
   run_docpool:
@@ -27,8 +20,8 @@ jobs:
         run: pip install -r requirements.txt
         
       - name: Run DocPool Bot
-        # 👇 [중요] 여기가 핵심입니다! 이 3줄이 있어야 봇이 열쇠를 받습니다.
         env:
+          # 👇 이 부분들이 꼭 있어야 합니다!
           GDRIVE_CREDS: ${{ secrets.GDRIVE_CREDS }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           MY_CHAT_ID: ${{ secrets.MY_CHAT_ID }}
