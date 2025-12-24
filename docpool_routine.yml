@@ -2,15 +2,9 @@ name: DocPool Update Bot
 
 on:
   schedule:
-    # -----------------------------------------------------------
-    # [⏰ UTC 시간 계산법]
-    # (한국 시간) - 9시간 = (UTC 시간)
-    #
-    # [설정] 매일 아침 8시 (08:00 KST) 실행
-    # 8 - 9 = -1 (날짜 넘어가서 23시)
-    # -----------------------------------------------------------
+    # 한국 시간 01:45 (UTC 16:45)
     - cron: '20 17 * * *'
-    
+  
   workflow_dispatch: # 수동 실행 버튼
 
 jobs:
@@ -28,6 +22,9 @@ jobs:
         
       - name: Run DocPool Bot
         env:
-          # 구글 시트 키 (Secrets에서 가져옴)
+          # 구글 시트 키
           GDRIVE_CREDS: ${{ secrets.GDRIVE_CREDS }}
+          # 👇 [추가됨] 텔레그램 알림을 위해 꼭 필요합니다!
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          MY_CHAT_ID: ${{ secrets.MY_CHAT_ID }}
         run: python docpool_bot.py
