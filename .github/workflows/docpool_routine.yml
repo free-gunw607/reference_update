@@ -56,7 +56,7 @@ jobs:
           GDRIVE_CREDS: ${{ secrets.GDRIVE_CREDS }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           MY_CHAT_ID: ${{ secrets.MY_CHAT_ID }}
-        # 여기서 봇들을 순서대로 실행합니다.
+        # 봇 3개를 순서대로 실행합니다.
         run: |
           echo "🤖 1. 소중한추억 봇 실행 중..."
           python docpool_bot.py
@@ -65,3 +65,8 @@ jobs:
           
           echo "🤖 2. 주식 증권사 리포트 봇 실행 중..."
           python company_report_bot.py
+          
+          echo "--------------------------------"
+          
+          echo "🤖 3. Papers 봇 실행 중..."
+          python papers_bot.py
