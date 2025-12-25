@@ -7,7 +7,9 @@ from telethon.sessions import StringSession
 from telethon.tl.types import MessageMediaDocument, MessageEntityUrl, MessageEntityTextUrl
 import gspread
 from google.oauth2.service_account import Credentials
-import google.generativeai as genai
+
+# [변경] 구글의 새로운 AI 라이브러리 임포트
+from google import genai
 
 # ==============================================================================
 # 📝 [사용자 수정 가이드]
@@ -26,8 +28,6 @@ CHANNEL_URL = "https://t.me/companyreport"
 GSHEET_ID = "19Q3KNbFu0ftr2hAqEdNwhf_UQvYXiXa2Vvk8lv9S6JY"
 GSHEET_TAB = "<데이터>[주식] 증권사 리포트"
 TZ_NAME = "Asia/Seoul"
-
-# 로컬 코드처럼 넉넉하게
 ITER_LIMIT = 10000 
 
 STOCKINFO_RE = re.compile(r"https?://stockinfo7\.com/stock/report/url/(\d+)", re.I)
@@ -35,30 +35,19 @@ CONSENSUS_RE = re.compile(r"https?://consensus\.hankyung\.com/\S*?report_idx=(\d
 URL_RE = re.compile(r'https?://\S+', re.I)
 LEADING_JUNK = re.compile(r'^[\u200B-\u200F\u202A-\u202E\u2060-\u2069\ufeff\s\r\n\t]+', re.S)
 
-# 환경변수 로드
 try:
     TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
     MY_CHAT_ID = os.environ.get('MY_CHAT_ID')
-    GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') # [추가] AI 키 로드
+    GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 except:
     TELEGRAM_TOKEN = None
     MY_CHAT_ID = None
     GEMINI_API_KEY = None
 
-# Gemini 설정
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-
 # =========================================================
-# [기능 1] AI 요약 모듈 (Trial: Fail-Safe)
+# [기능 1] AI 요약 모듈 (Updated to google-genai)
 # =========================================================
 def get_ai_summary_for_trial(target_url, title):
-    """
-    [Trial 모드]
-    1. URL에서 PDF 다운로드 (Requests)
-    2. Gemini Flash에게 요약 요청
-    3. 실패하면 None 반환 (절대 봇을 멈추지 않음)
-    """
     if not GEMINI_API_KEY or not target_url:
         return None
 
@@ -66,45 +55,46 @@ def get_ai_summary_for_trial(target_url, title):
     
     temp_pdf_path = None
     try:
-        # 1. PDF 다운로드 (브라우저인 척 헤더 설정)
+        # 1. PDF 다운로드
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        # 15초 타임아웃, 리다이렉트 허용
-        response = requests.get(target_url, headers=headers, timeout=15, allow_redirects=True)
+        response = requests.get(target_url, headers=headers, timeout=20, allow_redirects=True)
         
         if response.status_code != 200:
             print(f"  ❌ 다운로드 실패 (Status: {response.status_code})")
             return None
             
-        # PDF인지 확인 (Content-Type 또는 매직 넘버)
         content_type = response.headers.get('Content-Type', '').lower()
         if 'application/pdf' not in content_type and not response.content.startswith(b'%PDF'):
-            print(f"  ❌ PDF 파일이 아닙니다. (Type: {content_type})")
+            print(f"  ❌ PDF 파일이 아닙니다.")
             return None
 
-        # 2. 임시 파일로 저장 (Gemini File API는 파일 경로를 선호함)
+        # 2. 임시 파일 저장
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(response.content)
             temp_pdf_path = tmp.name
             
-        # 3. Gemini에게 업로드 및 요약 요청
-        # 1.5 Flash 모델 사용 (무료, 빠름)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        # 3. Gemini에게 요약 요청 (New Library Code)
+        client = genai.Client(api_key=GEMINI_API_KEY)
         
         # 파일 업로드
-        uploaded_file = genai.upload_file(temp_pdf_path, mime_type="application/pdf")
+        # google-genai는 파일을 직접 업로드 객체로 변환해줍니다.
+        uploaded_file = client.files.upload(file=temp_pdf_path)
         
-        # 프롬프트 (한국어로 핵심 3줄 요약)
         prompt = (
             "이 주식 리포트를 읽고 투자자가 알아야 할 핵심 내용을 3개 항목(bullet point)으로 요약해줘. "
             "수치(목표주가, 실적 등)가 있다면 반드시 포함해. "
             "말투는 '~함', '~임'체로 간결하게."
         )
         
-        result = model.generate_content([uploaded_file, prompt])
-        summary_text = result.text.strip()
+        # 콘텐츠 생성
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=[uploaded_file, prompt]
+        )
         
+        summary_text = response.text.strip()
         print("  ✅ 요약 완료!")
         return summary_text
 
@@ -112,14 +102,13 @@ def get_ai_summary_for_trial(target_url, title):
         print(f"  ⚠️ AI 요약 중 에러 발생 (무시함): {e}")
         return None
     finally:
-        # 4. 뒷정리 (임시 파일 삭제)
         if temp_pdf_path and os.path.exists(temp_pdf_path):
             try:
                 os.remove(temp_pdf_path)
             except: pass
 
 # =========================================================
-# [기능 2] 텔레그램 스마트 알림 (AI 요약 포함)
+# [기능 2] 텔레그램 스마트 알림 (기존과 동일)
 # =========================================================
 def send_telegram_smart(new_rows, ai_summary_text=None):
     if not TELEGRAM_TOKEN or not MY_CHAT_ID: return
@@ -138,7 +127,6 @@ def send_telegram_smart(new_rows, ai_summary_text=None):
         schedule_text_list.append(label)
     
     schedule_block = "\n".join(schedule_text_list)
-    
     time_tag = f"{now.month}/{now.day} {now.strftime('%H:%M')}"
     seq_title = f"{current_seq}회차" if current_seq > 0 else "수시"
     total_count = len(new_rows)
@@ -159,8 +147,6 @@ def send_telegram_smart(new_rows, ai_summary_text=None):
 
     MAX_LENGTH = 4000
     current_msg = header
-    
-    # 마지막 아이템의 인덱스 (AI 요약을 붙일 곳)
     last_item_idx = len(new_rows) 
     
     for idx, row in enumerate(new_rows, 1):
@@ -179,8 +165,6 @@ def send_telegram_smart(new_rows, ai_summary_text=None):
         else:
             line = f"{idx}. [{date_str}] {display_title}\n"
         
-        # [AI 요약 붙이기] 
-        # 마지막 항목이고, 요약 텍스트가 존재할 때만
         if idx == last_item_idx and ai_summary_text:
             line += f"\n🤖 <b>[AI 핵심 요약]</b>\n{ai_summary_text}\n"
 
@@ -202,7 +186,7 @@ def _send_chunk(text):
         print(f"❌ 전송 실패: {e}")
 
 # =========================================================
-# [기능 3] 리포트 ID 및 태그 추출
+# [기능 3] 리포트 ID 및 태그 추출 (기존과 동일)
 # =========================================================
 def get_report_id(text_or_url):
     if not text_or_url: return None
@@ -219,7 +203,7 @@ def detect_type_tag(text):
     return m.group(1).strip() if m else ""
 
 # =========================================================
-# [기능 4] 구글 시트 유틸
+# [기능 4] 구글 시트 유틸 (기존과 동일)
 # =========================================================
 def get_gsheet_client():
     if 'GDRIVE_CREDS' not in os.environ: sys.exit(1)
@@ -258,7 +242,7 @@ def fetch_sheet_info(ws):
         return 0, set(), 0
 
 # =========================================================
-# [기능 5] 파싱 유틸
+# [기능 5] 파싱 유틸 (기존과 동일)
 # =========================================================
 def normalize_leading(s):
     if not s: return ""
@@ -295,10 +279,10 @@ def extract_all_urls(text, entities, msg):
     return out
 
 # =========================================================
-# [메인] 실행 로직
+# [메인] 실행 로직 (기존과 동일)
 # =========================================================
 async def main():
-    print("🚀 [주식 증권사 리포트] 봇 가동 (AI Trial)...")
+    print("🚀 [주식 증권사 리포트] 봇 가동 (AI Trial - google-genai)...")
     
     try:
         gc = get_gsheet_client()
@@ -334,7 +318,6 @@ async def main():
         if not found_rid:
             continue
         
-        # [중단 조건] (Strict Incremental)
         if last_id > 0 and found_rid <= last_id:
             print(f"🛑 기준 ID({last_id}) 도달. 스캔 종료.")
             break
@@ -380,16 +363,13 @@ async def main():
     print(f"📤 {len(upload_data)}건 처리 중...")
     
     # [AI Trial Logic]
-    # 신규 데이터 중 가장 최신(마지막) 것 1개만 요약 시도
     ai_summary = None
     if upload_data:
-        latest_row = upload_data[-1] # 마지막 행
+        latest_row = upload_data[-1]
         latest_title = latest_row[2]
         latest_link = latest_row[3]
         
-        # 링크가 http로 시작하는지 확인 (텔레그램 링크면 다운 불가할 수 있으니 체크)
         if latest_link.startswith("http") and "t.me" not in latest_link:
-             # 여기서 요약 함수 호출!
              ai_summary = get_ai_summary_for_trial(latest_link, latest_title)
         else:
              print("  ⚠️ 최신 항목 링크가 요약 가능한 URL이 아님 (Skip)")
@@ -402,7 +382,6 @@ async def main():
         ws.update(range_name=cell_range, values=upload_data, value_input_option="RAW")
         print(f"✅ 시트 저장 완료 (범위: {cell_range})")
         
-        # 요약문(ai_summary)을 함께 전달
         send_telegram_smart(upload_data, ai_summary_text=ai_summary)
         
     except Exception as e:
