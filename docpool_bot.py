@@ -30,25 +30,29 @@ except:
     TELEGRAM_TOKEN = None
     MY_CHAT_ID = None
 
-# 정규식 (로컬 코드와 동일)
+# 정규식
 URL_RE = re.compile(r'https?://\S+', re.I)
 PDF_URL_RE = re.compile(r'https?://\S+\.pdf(\b|$)', re.I)
 ID_RE = re.compile(r'(\d+)(?=(?:\.pdf\b|/?$))')
 LEADING_JUNK = re.compile(r'^[\u200B-\u200F\u202A-\u202E\u2060-\u2069\ufeff\s\r\n\t]+', re.S)
 
 # =========================================================
-# [기능 1] 텔레그램 스마트 알림 (꽉 채워서 보내기)
+# [기능 1] 텔레그램 스마트 알림 (동적 시간 제목 + 꽉 채우기)
 # =========================================================
 def send_telegram_smart(new_rows):
     if not TELEGRAM_TOKEN or not MY_CHAT_ID:
         return
 
+    # 1. 현재 한국 시간 구하기 (예: 12/25 14:00)
+    now = datetime.now(ZoneInfo(TZ_NAME))
+    time_tag = f"{now.month}/{now.day} {now.strftime('%H:%M')}"
+
+    # 2. 제목에 시간 박아넣기
+    total_count = len(new_rows)
+    header = f"📚 <b>[{time_tag} 소중한추억] 업데이트</b>\n신규 리포트: {total_count}건\n{'='*20}\n\n"
+    
     # 텔레그램 메시지 한계 (안전하게 4000자)
     MAX_LENGTH = 4000
-    
-    total_count = len(new_rows)
-    header = f"📚 <b>[소중한추억] 업데이트 완료</b>\n신규 리포트: {total_count}건\n{'='*20}\n\n"
-    
     current_msg = header
     
     # 리스트 순회
@@ -77,7 +81,6 @@ def send_telegram_smart(new_rows):
             line = f"{idx}. [{date_str}] {clean_title}\n"
             
         # [스마트 분할 로직]
-        # 현재 메시지에 이 줄을 더했을 때 4000자가 넘으면 -> 발송 후 초기화
         if len(current_msg) + len(line) > MAX_LENGTH:
             _send_chunk(current_msg)
             # 다음 메시지 헤더 (이어짐 표시)
@@ -85,7 +88,7 @@ def send_telegram_smart(new_rows):
         else:
             current_msg += line
             
-    # 반복문이 끝나고 남은 내용이 있으면 발송
+    # 남은 내용 발송
     if current_msg:
         _send_chunk(current_msg)
 
@@ -94,7 +97,6 @@ def _send_chunk(text):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         r = requests.post(url, data={'chat_id': MY_CHAT_ID, 'text': text, 'parse_mode': 'HTML'})
-        # 순서 꼬임 방지 딜레이
         time.sleep(1)
     except Exception as e:
         print(f"❌ 전송 실패: {e}")
@@ -111,7 +113,7 @@ def normalize_for_dedup(msg_text: str) -> str:
     return s
 
 def dedup_insert(row_dict, row):
-    # 키: (날짜, 정규화된 내용) -> 내용이 같으면 같은 리포트로 취급
+    # 키: (날짜, 정규화된 내용)
     key = (row["date"], normalize_for_dedup(row["message"]))
     prev = row_dict.get(key)
     # 기존에 없거나, 현재 ID가 더 작으면(원본에 가까우면) 업데이트
@@ -138,16 +140,13 @@ def extract_report_ids_from_text(text):
         if m: ids.add(int(m.group(1)))
     return ids
 
-# [핵심] 실제 데이터가 있는 마지막 줄 번호 찾기
 def find_last_data_row(vals):
     last = 0
     for idx, row in enumerate(vals, start=1):
-        # A~D열 중 하나라도 값이 있으면 데이터로 간주
         if any((c or "").strip() for c in row[:4]):
             last = idx
     return last
 
-# 시트의 모든 ID와 마지막 줄 번호를 한 번에 파악
 def fetch_sheet_info(ws):
     try:
         vals = ws.get_all_values()
@@ -212,7 +211,7 @@ def is_pdf_message(msg_text, urls, msg):
 # [메인] 실행 로직
 # =========================================================
 async def main():
-    print("🚀 [소중한추억] 업데이트 봇 가동 (최종)...")
+    print("🚀 [소중한추억] 업데이트 봇 가동 (Dynamic Time)...")
     
     # 1. 시트 접속
     try:
@@ -222,7 +221,7 @@ async def main():
         print(f"❌ 구글 시트 에러: {e}")
         return
 
-    # 2. 시트 정보 로드 (중복 방지 & 이어쓰기 위치 확인)
+    # 2. 시트 정보 로드
     last_id, existing_ids, last_row_num = fetch_sheet_info(ws)
     print(f"📊 시트 상태: Max ID={last_id}, 총 데이터={len(existing_ids)}건, 마지막 줄={last_row_num}")
 
@@ -231,11 +230,11 @@ async def main():
     await client.connect()
     
     entity = await client.get_entity(CHANNEL_URL)
-    rows_dict = {} # 중복 제거용 딕셔너리
+    rows_dict = {} 
     
     print(f"🔍 스캔 시작 (기준 ID > {last_id}, 최대 {ITER_LIMIT}개)...")
     
-    # 4. 수집 (ITER_LIMIT=10000개까지)
+    # 4. 수집
     async for msg in client.iter_messages(entity, min_id=last_id, limit=ITER_LIMIT, reverse=True):
         text = normalize_leading(msg.message)
         urls = extract_all_urls(text, msg.entities, msg)
@@ -254,7 +253,6 @@ async def main():
         kst_dt = msg.date.astimezone(ZoneInfo(TZ_NAME))
         date_str = kst_dt.strftime("%Y-%m-%d")
         
-        # [중요] 이미 시트에 있는 ID는 절대 가져오지 않음
         if msg.id in existing_ids:
             continue
 
@@ -265,7 +263,6 @@ async def main():
             "links": links,
         }
         
-        # [중요] 내용 기반 정밀 중복 제거 (로컬 코드 로직)
         dedup_insert(rows_dict, row)
         
         if len(rows_dict) % 50 == 0:
@@ -273,7 +270,7 @@ async def main():
 
     await client.disconnect()
     
-    # 5. 데이터 정렬 (날짜 -> ID순)
+    # 5. 정렬
     sorted_rows = sorted(rows_dict.values(), key=lambda r: (r["date"], r["msg_id"]))
     
     # 업로드 포맷 변환
@@ -289,7 +286,6 @@ async def main():
     
     # 6. 업로드 & 알림
     try:
-        # 빈 줄 건너뛰고 바로 데이터 밑에 붙이기
         next_row = last_row_num + 1
         end_row = next_row + len(upload_data) - 1
         cell_range = f"A{next_row}:D{end_row}"
