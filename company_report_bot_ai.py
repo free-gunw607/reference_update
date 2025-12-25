@@ -10,6 +10,7 @@ from google.oauth2.service_account import Credentials
 
 # 구글 최신 라이브러리
 from google import genai
+from google.genai import types
 
 # ==============================================================================
 # 📝 [사용자 수정 가이드]
@@ -45,7 +46,7 @@ except:
     GEMINI_API_KEY = None
 
 # =========================================================
-# [기능 1] AI 요약 모듈 (Gemini 1.5 Flash 복귀)
+# [기능 1] AI 요약 모듈 (Fallback Strategy)
 # =========================================================
 def get_ai_summary_for_trial(target_url, title):
     if not GEMINI_API_KEY or not target_url:
@@ -75,10 +76,9 @@ def get_ai_summary_for_trial(target_url, title):
             tmp.write(response.content)
             temp_pdf_path = tmp.name
             
-        # 3. Gemini에게 요약 요청
+        # 3. Gemini에게 요약 요청 (여러 모델 시도)
         client = genai.Client(api_key=GEMINI_API_KEY)
         
-        # 파일 업로드
         uploaded_file = client.files.upload(file=temp_pdf_path)
         
         prompt = (
@@ -86,21 +86,48 @@ def get_ai_summary_for_trial(target_url, title):
             "수치(목표주가, 실적 등)가 있다면 반드시 포함해. "
             "말투는 '~함', '~임'체로 간결하게."
         )
+
+        # [핵심] 시도할 모델 리스트 (순서대로 시도)
+        # 1순위: 최신 안정판 (002)
+        # 2순위: 구버전 안정판 (001)
+        # 3순위: 알리아스
+        # 4순위: Pro 버전 (무료 티어)
+        models_to_try = [
+            "gemini-1.5-flash-002",
+            "gemini-1.5-flash-001",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro"
+        ]
+
+        summary_text = None
         
-        # [핵심 수정] 2.0-exp 대신 안정적인 1.5-flash 사용
-        # (이제 라이브러리가 최신이라 404 에러 안 남)
-        response = client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=[uploaded_file, prompt]
-        )
-        
-        summary_text = response.text.strip()
-        print("  ✅ 요약 완료!")
+        for model_name in models_to_try:
+            try:
+                print(f"  Trying model: {model_name}...")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=[uploaded_file, prompt]
+                )
+                if response.text:
+                    summary_text = response.text.strip()
+                    print(f"  ✅ 성공! ({model_name})")
+                    break # 성공하면 반복 종료
+            except Exception as inner_e:
+                err_msg = str(inner_e)
+                if "404" in err_msg:
+                    print(f"    Pass: {model_name} not found.")
+                    continue # 다음 모델 시도
+                elif "429" in err_msg:
+                    print(f"    Pass: {model_name} quota exceeded.")
+                    continue # 다음 모델 시도
+                else:
+                    print(f"    Error on {model_name}: {err_msg}")
+                    continue
+
         return summary_text
 
     except Exception as e:
-        # 429 에러 등 발생 시 내용을 출력해서 확인
-        print(f"  ⚠️ AI 요약 중 에러 발생 (무시함): {e}")
+        print(f"  ⚠️ AI 요약 최종 실패 (무시함): {e}")
         return None
     finally:
         if temp_pdf_path and os.path.exists(temp_pdf_path):
@@ -283,7 +310,7 @@ def extract_all_urls(text, entities, msg):
 # [메인] 실행 로직 (기존과 동일)
 # =========================================================
 async def main():
-    print("🚀 [주식 증권사 리포트] 봇 가동 (AI Trial - Gemini 1.5 Flash)...")
+    print("🚀 [주식 증권사 리포트] 봇 가동 (AI Trial - Robust Fallback)...")
     
     try:
         gc = get_gsheet_client()
