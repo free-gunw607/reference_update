@@ -1,40 +1,9 @@
 name: DocPool Update Bot
 
 on:
-  # ----------------------------------------------------------------------
-  # [⏰ 시간 설정 완전 정복 가이드]
-  #
-  # 1. 기본 규칙: (한국 시간) - 9 = (UTC 시간)
-  # 2. 분(Minute)은 그대로 적으세요. (한국 30분 = UTC 30분)
-  # 3. 시간이 섞여 있다면 '- cron' 줄을 여러 개 써도 됩니다.
-  #
-  # [작성 예시]
-  # - cron: '분 시 * * *'
-  #
-  # [공식] (한국 시간) - 9시간 = (설정할 UTC 시간)
-  #
-  # [현재 설정된 스케줄]
-  # 1. 아침 08:00 KST -> (08 - 9 = -1) -> 전날 23:00 UTC
-  # 2. 오후 13:00 KST -> (13 - 9 =  4) -> 당일 04:00 UTC
-  # 3. 오후 15:00 KST -> (15 - 9 =  6) -> 당일 06:00 UTC
-  # 4. 오후 18:00 KST -> (18 - 9 =  9) -> 당일 09:00 UTC
-  # 5. 저녁 20:00 KST -> (20 - 9 = 11) -> 당일 11:00 UTC
-  #
-  # [현재 설정된 스케줄]
-  # Group A: 정각(00분) 실행
-  # 08:00 KST (23:00 UTC) / 13:00 KST (04:00 UTC) / 15:00 KST (06:00 UTC)
-  # 18:00 KST (09:00 UTC) / 20:00 KST (11:00 UTC)
-  #
-  # (만약 08:30, 13:30을 추가하고 싶으면 아래 주석(#)을 풀고 쓰세요)
-  # ----------------------------------------------------------------------
   schedule:
-    # 1. 정각(00분) 타임 테이블
+    # 08:00, 13:00, 15:00, 18:00, 20:00 (KST)
     - cron: '0 4,6,9,11,23 * * *'
-    
-    # 2. 30분 타임 테이블 (필요하면 # 지우고 사용)
-    # 예: 08:30 KST(23:30 UTC), 13:30 KST(04:30 UTC)
-    # - cron: '30 4,23 * * *'
-
   workflow_dispatch:
 
 jobs:
@@ -49,6 +18,7 @@ jobs:
           python-version: '3.9'
           
       - name: Install dependencies
+        # google-generativeai 라이브러리가 설치되도록 requirements.txt 확인 필수!
         run: pip install -r requirements.txt
         
       - name: Run Bots
@@ -56,17 +26,20 @@ jobs:
           GDRIVE_CREDS: ${{ secrets.GDRIVE_CREDS }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           MY_CHAT_ID: ${{ secrets.MY_CHAT_ID }}
-        # 봇 3개를 순서대로 실행합니다.
+          # [추가] Gemini API 키 환경변수
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           echo "🤖 1. 소중한추억 봇 실행 중..."
-          python docpool_bot.py
+          python docpool_bot.py || echo "⚠️ DocPool 실행 중 오류 발생 (무시하고 계속)"
           
           echo "--------------------------------"
           
-          echo "🤖 2. 주식 증권사 리포트 봇 실행 중..."
-          python company_report_bot.py
+          echo "🤖 2. 주식 증권사 리포트 봇 (AI Trial) 실행 중..."
+          # [변경] 기존 봇 대신 AI 버전 실행!
+          # python company_report_bot.py  <-- 기존 봇 주석 처리
+          python company_report_bot_ai.py || echo "⚠️ Company Report(AI) 실행 중 오류 발생 (무시하고 계속)"
           
           echo "--------------------------------"
           
           echo "🤖 3. Papers 봇 실행 중..."
-          python papers_bot.py
+          python papers_bot.py || echo "⚠️ Papers 실행 중 오류 발생"
