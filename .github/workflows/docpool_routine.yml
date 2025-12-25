@@ -51,9 +51,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
         
-      - name: Run DocPool Bot
+      - name: Run Bots
         env:
           GDRIVE_CREDS: ${{ secrets.GDRIVE_CREDS }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           MY_CHAT_ID: ${{ secrets.MY_CHAT_ID }}
-        run: python docpool_bot.py
+        # 여기서 봇들을 순서대로 실행합니다.
+        run: |
+          echo "🤖 1. 소중한추억 봇 실행 중..."
+          python docpool_bot.py
+          
+          echo "--------------------------------"
+          
+          echo "🤖 2. 주식 증권사 리포트 봇 실행 중..."
+          python company_report_bot.py
