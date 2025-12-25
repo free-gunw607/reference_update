@@ -1,5 +1,5 @@
 import os, sys, re, json, asyncio, requests, time
-import tempfile
+import base64
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from telethon import TelegramClient
@@ -7,10 +7,6 @@ from telethon.sessions import StringSession
 from telethon.tl.types import MessageMediaDocument, MessageEntityUrl, MessageEntityTextUrl
 import gspread
 from google.oauth2.service_account import Credentials
-
-# 구글 최신 라이브러리
-from google import genai
-from google.genai import types
 
 # ==============================================================================
 # 📝 [사용자 수정 가이드]
@@ -46,97 +42,90 @@ except:
     GEMINI_API_KEY = None
 
 # =========================================================
-# [기능 1] AI 요약 모듈 (Fallback Strategy)
+# [기능 1] AI 요약 모듈 (Direct REST API 방식)
+# 라이브러리 의존성 없이 HTTP 요청으로 직접 통신
 # =========================================================
 def get_ai_summary_for_trial(target_url, title):
     if not GEMINI_API_KEY or not target_url:
         return None
 
-    print(f"🤖 [AI Trial] '{title}' 요약 시도 중...")
+    print(f"🤖 [AI Trial] '{title}' 요약 시도 중 (REST API)...")
     
-    temp_pdf_path = None
     try:
         # 1. PDF 다운로드
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
+        # PDF 다운로드 (타임아웃 20초)
         response = requests.get(target_url, headers=headers, timeout=20, allow_redirects=True)
         
         if response.status_code != 200:
             print(f"  ❌ 다운로드 실패 (Status: {response.status_code})")
             return None
-            
-        content_type = response.headers.get('Content-Type', '').lower()
-        if 'application/pdf' not in content_type and not response.content.startswith(b'%PDF'):
-            print(f"  ❌ PDF 파일이 아닙니다.")
+
+        # PDF 데이터 확인
+        pdf_bytes = response.content
+        if not pdf_bytes.startswith(b'%PDF'):
+            # 헤더에 Content-Type이 없어도 실제 내용이 PDF면 진행
+            print(f"  ❌ PDF 형식이 아닙니다.")
             return None
 
-        # 2. 임시 파일 저장
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(response.content)
-            temp_pdf_path = tmp.name
-            
-        # 3. Gemini에게 요약 요청 (여러 모델 시도)
-        client = genai.Client(api_key=GEMINI_API_KEY)
+        # 2. Base64 인코딩 (파일을 문자열로 변환)
+        # 구글 REST API는 작은 파일(20MB 이하)은 직접 전송 가능
+        b64_data = base64.b64encode(pdf_bytes).decode('utf-8')
+
+        # 3. 구글 REST API 호출
+        # 모델: gemini-1.5-flash (가장 안정적)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         
-        uploaded_file = client.files.upload(file=temp_pdf_path)
+        payload = {
+            "contents": [{
+                "parts": [
+                    {
+                        "text": (
+                            "이 주식 리포트를 읽고 투자자가 알아야 할 핵심 내용을 3개 항목(bullet point)으로 요약해줘. "
+                            "수치(목표주가, 실적 등)가 있다면 반드시 포함해. "
+                            "말투는 '~함', '~임'체로 간결하게 한국어로 작성해."
+                        )
+                    },
+                    {
+                        "inline_data": {
+                            "mime_type": "application/pdf",
+                            "data": b64_data
+                        }
+                    }
+                ]
+            }]
+        }
         
-        prompt = (
-            "이 주식 리포트를 읽고 투자자가 알아야 할 핵심 내용을 3개 항목(bullet point)으로 요약해줘. "
-            "수치(목표주가, 실적 등)가 있다면 반드시 포함해. "
-            "말투는 '~함', '~임'체로 간결하게."
+        # POST 요청 전송
+        api_res = requests.post(
+            url, 
+            headers={'Content-Type': 'application/json'},
+            data=json.dumps(payload),
+            timeout=30
         )
-
-        # [핵심] 시도할 모델 리스트 (순서대로 시도)
-        # 1순위: 최신 안정판 (002)
-        # 2순위: 구버전 안정판 (001)
-        # 3순위: 알리아스
-        # 4순위: Pro 버전 (무료 티어)
-        models_to_try = [
-            "gemini-1.5-flash-002",
-            "gemini-1.5-flash-001",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro"
-        ]
-
-        summary_text = None
         
-        for model_name in models_to_try:
-            try:
-                print(f"  Trying model: {model_name}...")
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=[uploaded_file, prompt]
-                )
-                if response.text:
-                    summary_text = response.text.strip()
-                    print(f"  ✅ 성공! ({model_name})")
-                    break # 성공하면 반복 종료
-            except Exception as inner_e:
-                err_msg = str(inner_e)
-                if "404" in err_msg:
-                    print(f"    Pass: {model_name} not found.")
-                    continue # 다음 모델 시도
-                elif "429" in err_msg:
-                    print(f"    Pass: {model_name} quota exceeded.")
-                    continue # 다음 모델 시도
-                else:
-                    print(f"    Error on {model_name}: {err_msg}")
-                    continue
+        if api_res.status_code != 200:
+            print(f"  ⚠️ API 호출 실패: {api_res.text}")
+            return None
 
-        return summary_text
+        # 4. 결과 파싱
+        res_json = api_res.json()
+        try:
+            summary_text = res_json['candidates'][0]['content']['parts'][0]['text']
+            print("  ✅ 요약 완료!")
+            return summary_text.strip()
+        except KeyError:
+            print(f"  ⚠️ 응답 파싱 실패: {res_json}")
+            return None
 
     except Exception as e:
-        print(f"  ⚠️ AI 요약 최종 실패 (무시함): {e}")
+        print(f"  ⚠️ 시스템 에러 (무시함): {e}")
         return None
-    finally:
-        if temp_pdf_path and os.path.exists(temp_pdf_path):
-            try:
-                os.remove(temp_pdf_path)
-            except: pass
 
 # =========================================================
-# [기능 2] 텔레그램 스마트 알림 (기존과 동일)
+# [기능 2] 텔레그램 스마트 알림
 # =========================================================
 def send_telegram_smart(new_rows, ai_summary_text=None):
     if not TELEGRAM_TOKEN or not MY_CHAT_ID: return
@@ -214,7 +203,7 @@ def _send_chunk(text):
         print(f"❌ 전송 실패: {e}")
 
 # =========================================================
-# [기능 3] 리포트 ID 및 태그 추출 (기존과 동일)
+# [기능 3] 리포트 ID 및 태그 추출
 # =========================================================
 def get_report_id(text_or_url):
     if not text_or_url: return None
@@ -231,7 +220,7 @@ def detect_type_tag(text):
     return m.group(1).strip() if m else ""
 
 # =========================================================
-# [기능 4] 구글 시트 유틸 (기존과 동일)
+# [기능 4] 구글 시트 유틸
 # =========================================================
 def get_gsheet_client():
     if 'GDRIVE_CREDS' not in os.environ: sys.exit(1)
@@ -270,7 +259,7 @@ def fetch_sheet_info(ws):
         return 0, set(), 0
 
 # =========================================================
-# [기능 5] 파싱 유틸 (기존과 동일)
+# [기능 5] 파싱 유틸
 # =========================================================
 def normalize_leading(s):
     if not s: return ""
@@ -307,10 +296,10 @@ def extract_all_urls(text, entities, msg):
     return out
 
 # =========================================================
-# [메인] 실행 로직 (기존과 동일)
+# [메인] 실행 로직
 # =========================================================
 async def main():
-    print("🚀 [주식 증권사 리포트] 봇 가동 (AI Trial - Robust Fallback)...")
+    print("🚀 [주식 증권사 리포트] 봇 가동 (AI Trial - Direct REST API)...")
     
     try:
         gc = get_gsheet_client()
