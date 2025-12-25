@@ -7,6 +7,13 @@ from telethon.tl.types import MessageMediaDocument, MessageEntityUrl, MessageEnt
 import gspread
 from google.oauth2.service_account import Credentials
 
+# ==============================================================================
+# 📝 [사용자 수정 가이드]
+# YAML 파일의 스케줄(시간)을 변경하면, 아래 리스트의 숫자도 맞춰주세요.
+# 그래야 메시지에 "현재" 위치가 정확히 표시됩니다.
+# ==============================================================================
+SCHEDULE_HOURS = [8, 13, 15, 18, 20]
+
 # =========================================================
 # [설정] 인증 정보 및 상수
 # =========================================================
@@ -37,58 +44,81 @@ ID_RE = re.compile(r'(\d+)(?=(?:\.pdf\b|/?$))')
 LEADING_JUNK = re.compile(r'^[\u200B-\u200F\u202A-\u202E\u2060-\u2069\ufeff\s\r\n\t]+', re.S)
 
 # =========================================================
-# [기능 1] 텔레그램 스마트 알림 (동적 시간 제목 + 꽉 채우기)
+# [기능 1] 텔레그램 스마트 알림 (일정표 포함 + 꽉 채우기)
 # =========================================================
 def send_telegram_smart(new_rows):
     if not TELEGRAM_TOKEN or not MY_CHAT_ID:
         return
 
-    # 1. 현재 한국 시간 구하기 (예: 12/25 14:00)
+    # 1. 현재 시간 및 회차 계산
     now = datetime.now(ZoneInfo(TZ_NAME))
-    time_tag = f"{now.month}/{now.day} {now.strftime('%H:%M')}"
-
-    # 2. 제목에 시간 박아넣기
-    total_count = len(new_rows)
-    header = f"📚 <b>[{time_tag} 소중한추억] 업데이트</b>\n신규 리포트: {total_count}건\n{'='*20}\n\n"
+    current_hour = now.hour
     
-    # 텔레그램 메시지 한계 (안전하게 4000자)
+    schedule_text_list = []
+    current_seq = 0
+    
+    # 일정표 만들기
+    for idx, h in enumerate(SCHEDULE_HOURS, 1):
+        label = f"{idx}회: {h:02d}:00"
+        # 현재 시간이 스케줄과 같으면 '현재' 표시
+        if current_hour == h:
+             label += " (현재) 👈"
+             current_seq = idx
+        schedule_text_list.append(label)
+    
+    schedule_block = "\n".join(schedule_text_list)
+    
+    time_tag = f"{now.month}/{now.day} {now.strftime('%H:%M')}"
+    seq_title = f"{current_seq}회차" if current_seq > 0 else "수시"
+    total_count = len(new_rows)
+
+    # 2. 헤더 조립 (요청하신 포맷 적용)
+    header = (
+        f"📚 <b>[{time_tag} | {seq_title}] 소중한추억 업데이트</b>\n"
+        f"신규: {total_count}건\n"
+        f"{'='*20}\n"
+        f"[금일 업로드 계획]\n"
+        f"{schedule_block}\n"
+        f"{'='*20}\n\n"
+    )
+    
+    # [빈 결과 알림] 데이터가 없어도 알림 전송
+    if total_count == 0:
+        msg = header + "(업데이트 된 내용이 없습니다)"
+        _send_chunk(msg)
+        return
+
+    # 3. 메시지 본문 생성 (4000자 제한)
     MAX_LENGTH = 4000
     current_msg = header
     
-    # 리스트 순회
     for idx, row in enumerate(new_rows, 1):
         # row: [date, "", message, links]
         date_str = row[0]
         title = row[2]
         links_str = row[3]
 
-        # 제목 HTML 이스케이프 및 길이 제한
         clean_title = title.replace("<", "&lt;").replace(">", "&gt;") 
         if len(clean_title) > 35: 
             clean_title = clean_title[:35] + "..."
             
-        # 첫 번째 링크 추출
         target_link = ""
         if links_str:
             first_link = links_str.split(',')[0].strip()
             if first_link.startswith("http"):
                 target_link = first_link
         
-        # 한 줄 생성
         if target_link:
             line = f"{idx}. [{date_str}] <a href='{target_link}'>{clean_title}</a>\n"
         else:
             line = f"{idx}. [{date_str}] {clean_title}\n"
             
-        # [스마트 분할 로직]
         if len(current_msg) + len(line) > MAX_LENGTH:
             _send_chunk(current_msg)
-            # 다음 메시지 헤더 (이어짐 표시)
             current_msg = f"📚 <b>[이어짐] ({idx}번부터~)</b>\n\n" + line
         else:
             current_msg += line
             
-    # 남은 내용 발송
     if current_msg:
         _send_chunk(current_msg)
 
@@ -96,7 +126,7 @@ def _send_chunk(text):
     """실제 전송 함수"""
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        r = requests.post(url, data={'chat_id': MY_CHAT_ID, 'text': text, 'parse_mode': 'HTML'})
+        requests.post(url, data={'chat_id': MY_CHAT_ID, 'text': text, 'parse_mode': 'HTML'})
         time.sleep(1)
     except Exception as e:
         print(f"❌ 전송 실패: {e}")
@@ -208,10 +238,10 @@ def is_pdf_message(msg_text, urls, msg):
     return False
 
 # =========================================================
-# [메인] 실행 로직
+# [메인] 실행 로직 (크롤링 메커니즘 유지: reverse=True, min_id)
 # =========================================================
 async def main():
-    print("🚀 [소중한추억] 업데이트 봇 가동 (Dynamic Time)...")
+    print("🚀 [소중한추억] 업데이트 봇 가동...")
     
     # 1. 시트 접속
     try:
@@ -234,7 +264,8 @@ async def main():
     
     print(f"🔍 스캔 시작 (기준 ID > {last_id}, 최대 {ITER_LIMIT}개)...")
     
-    # 4. 수집
+    # 4. 수집 (기존 로직 유지: 과거->최신, min_id 사용)
+    # [검증 완료] reverse=True를 사용하여 과거 메시지부터 순차적으로 가져오므로 데이터 누락 없음
     async for msg in client.iter_messages(entity, min_id=last_id, limit=ITER_LIMIT, reverse=True):
         text = normalize_leading(msg.message)
         urls = extract_all_urls(text, msg.entities, msg)
@@ -270,7 +301,7 @@ async def main():
 
     await client.disconnect()
     
-    # 5. 정렬
+    # 5. 정렬 (날짜 -> ID순)
     sorted_rows = sorted(rows_dict.values(), key=lambda r: (r["date"], r["msg_id"]))
     
     # 업로드 포맷 변환
@@ -278,8 +309,10 @@ async def main():
     for r in sorted_rows:
         upload_data.append([r["date"], "", r["message"], r["links"]])
 
+    # [수정] 빈 결과 알림 전송 로직 추가
     if not upload_data:
         print("💤 업데이트할 신규 데이터가 없습니다.")
+        send_telegram_smart([])
         return
 
     print(f"📤 {len(upload_data)}건 업로드 준비 중...")
