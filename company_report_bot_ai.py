@@ -42,7 +42,7 @@ except:
     GEMINI_API_KEY = None
 
 # =========================================================
-# [기능 1] AI 요약 모듈 (REST API + Retry Strategy)
+# [기능 1] AI 요약 모듈 (REST API + 2.0 Model List)
 # =========================================================
 def get_ai_summary_for_trial(target_url, title):
     if not GEMINI_API_KEY or not target_url:
@@ -69,13 +69,13 @@ def get_ai_summary_for_trial(target_url, title):
         # 2. Base64 인코딩
         b64_data = base64.b64encode(pdf_bytes).decode('utf-8')
 
-        # 3. 모델 리스트 순회 (될 때까지 시도)
-        # 1.5-flash-002 (최신), 001 (구버전), alias, pro 순서
+        # 3. 모델 리스트 순회 (사용자 리스트 기반)
+        # 중요: 사용자 계정에 존재하는 모델들만 순서대로 시도
         models_to_try = [
-            "gemini-1.5-flash-002", 
-            "gemini-1.5-flash-001",
-            "gemini-1.5-flash", 
-            "gemini-1.5-pro"
+            "gemini-2.0-flash",                # 1순위: 2.0 정식
+            "gemini-2.0-flash-001",            # 2순위: 2.0 버전 지정
+            "gemini-2.0-flash-lite-preview-02-05", # 3순위: 라이트 (가볍고 무료일 확률 높음)
+            "gemini-flash-latest"              # 4순위: 최신 플래시 별명
         ]
         
         summary_text = None
@@ -119,11 +119,12 @@ def get_ai_summary_for_trial(target_url, title):
                         print(f"  ✅ 성공! ({model_name})")
                         break # 성공하면 반복 탈출
                     except:
-                        print(f"    ⚠️ 응답 형식 오류 ({model_name})")
+                        print(f"    ⚠️ 응답 파싱 오류 ({model_name})")
                         continue
                 else:
                     # 404(Not Found)나 429(Quota)면 다음 모델 시도
-                    print(f"    Fail ({model_name}): {api_res.status_code} - {api_res.text[:100]}")
+                    # 에러 메시지를 짧게 출력
+                    print(f"    Fail ({model_name}): {api_res.status_code}")
                     continue
 
             except Exception as e:
@@ -133,7 +134,7 @@ def get_ai_summary_for_trial(target_url, title):
         if summary_text:
             return summary_text.strip()
         else:
-            print("  ❌ 모든 모델 시도 실패.")
+            print("  ❌ 모든 모델 시도 실패. (Quota 문제일 수 있음)")
             return None
 
     except Exception as e:
@@ -315,7 +316,7 @@ def extract_all_urls(text, entities, msg):
 # [메인] 실행 로직
 # =========================================================
 async def main():
-    print("🚀 [주식 증권사 리포트] 봇 가동 (AI Trial - Multi Model REST)...")
+    print("🚀 [주식 증권사 리포트] 봇 가동 (AI Trial - Validated Models)...")
     
     try:
         gc = get_gsheet_client()
