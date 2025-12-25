@@ -8,7 +8,7 @@ from telethon.tl.types import MessageMediaDocument, MessageEntityUrl, MessageEnt
 import gspread
 from google.oauth2.service_account import Credentials
 
-# [변경] 구글의 새로운 AI 라이브러리
+# 구글 최신 라이브러리
 from google import genai
 
 # ==============================================================================
@@ -45,7 +45,7 @@ except:
     GEMINI_API_KEY = None
 
 # =========================================================
-# [기능 1] AI 요약 모듈 (Gemini 2.0 Flash 적용)
+# [기능 1] AI 요약 모듈 (Gemini 1.5 Flash 복귀)
 # =========================================================
 def get_ai_summary_for_trial(target_url, title):
     if not GEMINI_API_KEY or not target_url:
@@ -87,9 +87,10 @@ def get_ai_summary_for_trial(target_url, title):
             "말투는 '~함', '~임'체로 간결하게."
         )
         
-        # [핵심 변경] 모델을 최신 'gemini-2.0-flash-exp'로 변경!
+        # [핵심 수정] 2.0-exp 대신 안정적인 1.5-flash 사용
+        # (이제 라이브러리가 최신이라 404 에러 안 남)
         response = client.models.generate_content(
-            model="gemini-2.0-flash-exp",
+            model="gemini-1.5-flash",
             contents=[uploaded_file, prompt]
         )
         
@@ -98,6 +99,7 @@ def get_ai_summary_for_trial(target_url, title):
         return summary_text
 
     except Exception as e:
+        # 429 에러 등 발생 시 내용을 출력해서 확인
         print(f"  ⚠️ AI 요약 중 에러 발생 (무시함): {e}")
         return None
     finally:
@@ -164,7 +166,6 @@ def send_telegram_smart(new_rows, ai_summary_text=None):
         else:
             line = f"{idx}. [{date_str}] {display_title}\n"
         
-        # 마지막 항목에 AI 요약 부착
         if idx == last_item_idx and ai_summary_text:
             line += f"\n🤖 <b>[AI 핵심 요약]</b>\n{ai_summary_text}\n"
 
@@ -186,7 +187,7 @@ def _send_chunk(text):
         print(f"❌ 전송 실패: {e}")
 
 # =========================================================
-# [기능 3] 리포트 ID 및 태그 추출
+# [기능 3] 리포트 ID 및 태그 추출 (기존과 동일)
 # =========================================================
 def get_report_id(text_or_url):
     if not text_or_url: return None
@@ -203,7 +204,7 @@ def detect_type_tag(text):
     return m.group(1).strip() if m else ""
 
 # =========================================================
-# [기능 4] 구글 시트 유틸
+# [기능 4] 구글 시트 유틸 (기존과 동일)
 # =========================================================
 def get_gsheet_client():
     if 'GDRIVE_CREDS' not in os.environ: sys.exit(1)
@@ -242,7 +243,7 @@ def fetch_sheet_info(ws):
         return 0, set(), 0
 
 # =========================================================
-# [기능 5] 파싱 유틸
+# [기능 5] 파싱 유틸 (기존과 동일)
 # =========================================================
 def normalize_leading(s):
     if not s: return ""
@@ -279,10 +280,10 @@ def extract_all_urls(text, entities, msg):
     return out
 
 # =========================================================
-# [메인] 실행 로직
+# [메인] 실행 로직 (기존과 동일)
 # =========================================================
 async def main():
-    print("🚀 [주식 증권사 리포트] 봇 가동 (AI Trial - Gemini 2.0)...")
+    print("🚀 [주식 증권사 리포트] 봇 가동 (AI Trial - Gemini 1.5 Flash)...")
     
     try:
         gc = get_gsheet_client()
