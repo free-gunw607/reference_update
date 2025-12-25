@@ -8,7 +8,7 @@ from telethon.tl.types import MessageMediaDocument, MessageEntityUrl, MessageEnt
 import gspread
 from google.oauth2.service_account import Credentials
 
-# [변경] 구글의 새로운 AI 라이브러리 임포트
+# [변경] 구글의 새로운 AI 라이브러리
 from google import genai
 
 # ==============================================================================
@@ -45,7 +45,7 @@ except:
     GEMINI_API_KEY = None
 
 # =========================================================
-# [기능 1] AI 요약 모듈 (Updated to google-genai)
+# [기능 1] AI 요약 모듈 (Gemini 2.0 Flash 적용)
 # =========================================================
 def get_ai_summary_for_trial(target_url, title):
     if not GEMINI_API_KEY or not target_url:
@@ -75,11 +75,10 @@ def get_ai_summary_for_trial(target_url, title):
             tmp.write(response.content)
             temp_pdf_path = tmp.name
             
-        # 3. Gemini에게 요약 요청 (New Library Code)
+        # 3. Gemini에게 요약 요청
         client = genai.Client(api_key=GEMINI_API_KEY)
         
         # 파일 업로드
-        # google-genai는 파일을 직접 업로드 객체로 변환해줍니다.
         uploaded_file = client.files.upload(file=temp_pdf_path)
         
         prompt = (
@@ -88,9 +87,9 @@ def get_ai_summary_for_trial(target_url, title):
             "말투는 '~함', '~임'체로 간결하게."
         )
         
-        # 콘텐츠 생성
+        # [핵심 변경] 모델을 최신 'gemini-2.0-flash-exp'로 변경!
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash-exp",
             contents=[uploaded_file, prompt]
         )
         
@@ -165,6 +164,7 @@ def send_telegram_smart(new_rows, ai_summary_text=None):
         else:
             line = f"{idx}. [{date_str}] {display_title}\n"
         
+        # 마지막 항목에 AI 요약 부착
         if idx == last_item_idx and ai_summary_text:
             line += f"\n🤖 <b>[AI 핵심 요약]</b>\n{ai_summary_text}\n"
 
@@ -186,7 +186,7 @@ def _send_chunk(text):
         print(f"❌ 전송 실패: {e}")
 
 # =========================================================
-# [기능 3] 리포트 ID 및 태그 추출 (기존과 동일)
+# [기능 3] 리포트 ID 및 태그 추출
 # =========================================================
 def get_report_id(text_or_url):
     if not text_or_url: return None
@@ -203,7 +203,7 @@ def detect_type_tag(text):
     return m.group(1).strip() if m else ""
 
 # =========================================================
-# [기능 4] 구글 시트 유틸 (기존과 동일)
+# [기능 4] 구글 시트 유틸
 # =========================================================
 def get_gsheet_client():
     if 'GDRIVE_CREDS' not in os.environ: sys.exit(1)
@@ -242,7 +242,7 @@ def fetch_sheet_info(ws):
         return 0, set(), 0
 
 # =========================================================
-# [기능 5] 파싱 유틸 (기존과 동일)
+# [기능 5] 파싱 유틸
 # =========================================================
 def normalize_leading(s):
     if not s: return ""
@@ -279,10 +279,10 @@ def extract_all_urls(text, entities, msg):
     return out
 
 # =========================================================
-# [메인] 실행 로직 (기존과 동일)
+# [메인] 실행 로직
 # =========================================================
 async def main():
-    print("🚀 [주식 증권사 리포트] 봇 가동 (AI Trial - google-genai)...")
+    print("🚀 [주식 증권사 리포트] 봇 가동 (AI Trial - Gemini 2.0)...")
     
     try:
         gc = get_gsheet_client()
