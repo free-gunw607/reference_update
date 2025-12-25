@@ -42,8 +42,7 @@ except:
     GEMINI_API_KEY = None
 
 # =========================================================
-# [기능 1] AI 요약 모듈 (Direct REST API 방식)
-# 라이브러리 의존성 없이 HTTP 요청으로 직접 통신
+# [기능 1] AI 요약 모듈 (REST API + Retry Strategy)
 # =========================================================
 def get_ai_summary_for_trial(target_url, title):
     if not GEMINI_API_KEY or not target_url:
@@ -56,68 +55,85 @@ def get_ai_summary_for_trial(target_url, title):
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        # PDF 다운로드 (타임아웃 20초)
         response = requests.get(target_url, headers=headers, timeout=20, allow_redirects=True)
         
         if response.status_code != 200:
             print(f"  ❌ 다운로드 실패 (Status: {response.status_code})")
             return None
 
-        # PDF 데이터 확인
         pdf_bytes = response.content
         if not pdf_bytes.startswith(b'%PDF'):
-            # 헤더에 Content-Type이 없어도 실제 내용이 PDF면 진행
             print(f"  ❌ PDF 형식이 아닙니다.")
             return None
 
-        # 2. Base64 인코딩 (파일을 문자열로 변환)
-        # 구글 REST API는 작은 파일(20MB 이하)은 직접 전송 가능
+        # 2. Base64 인코딩
         b64_data = base64.b64encode(pdf_bytes).decode('utf-8')
 
-        # 3. 구글 REST API 호출
-        # 모델: gemini-1.5-flash (가장 안정적)
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        # 3. 모델 리스트 순회 (될 때까지 시도)
+        # 1.5-flash-002 (최신), 001 (구버전), alias, pro 순서
+        models_to_try = [
+            "gemini-1.5-flash-002", 
+            "gemini-1.5-flash-001",
+            "gemini-1.5-flash", 
+            "gemini-1.5-pro"
+        ]
         
-        payload = {
-            "contents": [{
-                "parts": [
-                    {
-                        "text": (
-                            "이 주식 리포트를 읽고 투자자가 알아야 할 핵심 내용을 3개 항목(bullet point)으로 요약해줘. "
-                            "수치(목표주가, 실적 등)가 있다면 반드시 포함해. "
-                            "말투는 '~함', '~임'체로 간결하게 한국어로 작성해."
-                        )
-                    },
-                    {
-                        "inline_data": {
-                            "mime_type": "application/pdf",
-                            "data": b64_data
-                        }
-                    }
-                ]
-            }]
-        }
-        
-        # POST 요청 전송
-        api_res = requests.post(
-            url, 
-            headers={'Content-Type': 'application/json'},
-            data=json.dumps(payload),
-            timeout=30
-        )
-        
-        if api_res.status_code != 200:
-            print(f"  ⚠️ API 호출 실패: {api_res.text}")
-            return None
+        summary_text = None
 
-        # 4. 결과 파싱
-        res_json = api_res.json()
-        try:
-            summary_text = res_json['candidates'][0]['content']['parts'][0]['text']
-            print("  ✅ 요약 완료!")
+        for model_name in models_to_try:
+            print(f"  Trying model: {model_name}...")
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+            
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {
+                            "text": (
+                                "이 주식 리포트를 읽고 투자자가 알아야 할 핵심 내용을 3개 항목(bullet point)으로 요약해줘. "
+                                "수치(목표주가, 실적 등)가 있다면 반드시 포함해. "
+                                "말투는 '~함', '~임'체로 간결하게 한국어로 작성해."
+                            )
+                        },
+                        {
+                            "inline_data": {
+                                "mime_type": "application/pdf",
+                                "data": b64_data
+                            }
+                        }
+                    ]
+                }]
+            }
+            
+            try:
+                api_res = requests.post(
+                    url, 
+                    headers={'Content-Type': 'application/json'},
+                    data=json.dumps(payload),
+                    timeout=30
+                )
+                
+                if api_res.status_code == 200:
+                    res_json = api_res.json()
+                    try:
+                        summary_text = res_json['candidates'][0]['content']['parts'][0]['text']
+                        print(f"  ✅ 성공! ({model_name})")
+                        break # 성공하면 반복 탈출
+                    except:
+                        print(f"    ⚠️ 응답 형식 오류 ({model_name})")
+                        continue
+                else:
+                    # 404(Not Found)나 429(Quota)면 다음 모델 시도
+                    print(f"    Fail ({model_name}): {api_res.status_code} - {api_res.text[:100]}")
+                    continue
+
+            except Exception as e:
+                print(f"    Error ({model_name}): {e}")
+                continue
+        
+        if summary_text:
             return summary_text.strip()
-        except KeyError:
-            print(f"  ⚠️ 응답 파싱 실패: {res_json}")
+        else:
+            print("  ❌ 모든 모델 시도 실패.")
             return None
 
     except Exception as e:
@@ -299,7 +315,7 @@ def extract_all_urls(text, entities, msg):
 # [메인] 실행 로직
 # =========================================================
 async def main():
-    print("🚀 [주식 증권사 리포트] 봇 가동 (AI Trial - Direct REST API)...")
+    print("🚀 [주식 증권사 리포트] 봇 가동 (AI Trial - Multi Model REST)...")
     
     try:
         gc = get_gsheet_client()
