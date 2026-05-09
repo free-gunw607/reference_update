@@ -1,4 +1,4 @@
-import os, sys, re, json, asyncio, requests, time
+import os, sys, re, json, asyncio, requests, time, unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -354,6 +354,38 @@ def is_pdf_document_message(msg):
     return "pdf" in mime.lower()
 
 
+def normalize_for_match(s: str) -> str:
+    s = unicodedata.normalize("NFKC", (s or "").lower())
+    return re.sub(r"[^0-9a-z가-힣 ]", " ", s)
+
+
+def extract_keywords_from_filename(name: str):
+    stop = {
+        "기업", "산업", "증권", "리포트", "주식", "review", "preview", "global", "the",
+        "이슈", "코멘트", "daily", "weekly", "morning", "talk", "issue"
+    }
+    base = re.sub(r"\.pdf$", "", name or "", flags=re.I)
+    parts = [p for p in re.split(r"[_\-\s]+", normalize_for_match(base)) if p]
+    out = []
+    for p in parts:
+        if len(p) < 2 or p in stop or p.isdigit():
+            continue
+        out.append(p)
+    return out[:12]
+
+
+def score_summary_candidate(text: str, keywords):
+    if not text:
+        return 0
+    markers = ("제목:", "핵심 요약", "투자의견", "목표주가", "작성일:")
+    if not any(m in text for m in markers):
+        return 0
+    nt = normalize_for_match(text)
+    hits = sum(1 for k in keywords if k in nt)
+    bonus = 2 if ("핵심 요약" in text and "제목:" in text) else 1
+    return hits * 10 + bonus
+
+
 def looks_like_summary_text(text):
     if not text:
         return False
@@ -472,9 +504,52 @@ async def main():
         if len(rows_dict) % 50 == 0:
             print(f"  ... {len(rows_dict)}건 수집 중")
 
+    # 5. 요약 빈칸 보강
+    # fwd/빈캡션 예외까지 고려해 +15 범위에서 요약 후보를 검색한다.
+    missing_rows = [r for r in rows_dict.values() if not (r.get("summary") or "").strip()]
+    if missing_rows:
+        print(f"🧩 요약 보강 시작: 대상 {len(missing_rows)}건")
+        # 조회 대상 ID를 한 번에 모아 배치 조회
+        target_ids = set()
+        for r in missing_rows:
+            mid = int(r["msg_id"])
+            for cid in range(mid + 1, mid + 16):
+                target_ids.add(cid)
+        nearby_map = {}
+        target_ids = sorted(target_ids)
+        chunk = 200
+        for i in range(0, len(target_ids), chunk):
+            msgs = await client.get_messages(entity, ids=target_ids[i:i+chunk])
+            if not isinstance(msgs, list):
+                msgs = [msgs]
+            for m in msgs:
+                if m:
+                    nearby_map[m.id] = m
+
+        filled = 0
+        for r in missing_rows:
+            mid = int(r["msg_id"])
+            kw = extract_keywords_from_filename(r["message"])
+            best_text = ""
+            best_score = 0
+            for cid in range(mid + 1, mid + 16):
+                cm = nearby_map.get(cid)
+                if not cm:
+                    continue
+                ctext = normalize_leading(cm.message)
+                sc = score_summary_candidate(ctext, kw)
+                if sc > best_score:
+                    best_score = sc
+                    best_text = ctext
+            # 임계치 완화: marker만 있어도 채택될 수 있도록 2점 이상 허용
+            if best_text and best_score >= 2:
+                r["summary"] = best_text
+                filled += 1
+        print(f"✅ 요약 보강 완료: {filled}/{len(missing_rows)}건 채움")
+
     await client.disconnect()
     
-    # 5. 정렬 (날짜 -> ID순)
+    # 6. 정렬 (날짜 -> ID순)
     sorted_rows = sorted(rows_dict.values(), key=lambda r: (r["date"], r["msg_id"]))
     
     # 업로드 포맷 변환
@@ -482,7 +557,7 @@ async def main():
     for r in sorted_rows:
         upload_data.append([r["date"], "", r["message"], r["tg_link"], r["summary"]])
 
-    # [수정] 빈 결과 알림 전송 로직 추가
+    # 7. 빈 결과 처리
     if not upload_data:
         print("💤 업데이트할 신규 데이터가 없습니다.")
         send_telegram_smart([])
@@ -490,7 +565,7 @@ async def main():
 
     print(f"📤 {len(upload_data)}건 업로드 준비 중...")
     
-    # 6. 업로드/로컬저장 & 알림
+    # 8. 업로드/로컬저장 & 알림
     try:
         if OUTPUT_MODE == "local":
             save_local_output(upload_data)
