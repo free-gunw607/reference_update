@@ -498,6 +498,8 @@ async def main():
             "message": message_cell,
             "tg_link": tg_link,
             "summary": summary_cell,
+            "_is_fwd": bool(getattr(msg, "fwd_from", None)),
+            "_source_text_blank": not bool(body_raw.strip()),
         }
         dedup_insert(rows_dict, row)
         
@@ -545,6 +547,24 @@ async def main():
             if best_text and best_score >= 2:
                 r["summary"] = best_text
                 filled += 1
+                continue
+
+            # 2차 보강: fwd + 원문 빈캡션 케이스는 동일 +15 범위에서 임계치를 더 낮춘다.
+            if r.get("_is_fwd") and r.get("_source_text_blank"):
+                best_text = ""
+                best_score = 0
+                for cid in range(mid + 1, mid + 16):
+                    cm = nearby_map.get(cid)
+                    if not cm:
+                        continue
+                    ctext = normalize_leading(cm.message)
+                    sc = score_summary_candidate(ctext, kw)
+                    if sc > best_score:
+                        best_score = sc
+                        best_text = ctext
+                if best_text and best_score >= 1:
+                    r["summary"] = best_text
+                    filled += 1
         print(f"✅ 요약 보강 완료: {filled}/{len(missing_rows)}건 채움")
 
     await client.disconnect()
