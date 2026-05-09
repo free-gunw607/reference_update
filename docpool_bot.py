@@ -29,6 +29,8 @@ TZ_NAME = "Asia/Seoul"
 BACKFILL_FROM = os.getenv("DOCPOOL_BACKFILL_FROM", "").strip()  # YYYY-MM-DD
 BACKFILL_TO = os.getenv("DOCPOOL_BACKFILL_TO", "").strip()      # YYYY-MM-DD
 OUTPUT_MODE = os.getenv("DOCPOOL_OUTPUT_MODE", "gsheet").strip().lower()  # gsheet | local
+# backfill에서 기존 시트 중복 차단을 무시할지 여부 (기본: local 모드 백필이면 True)
+BACKFILL_IGNORE_EXISTING = os.getenv("DOCPOOL_BACKFILL_IGNORE_EXISTING", "").strip().lower()
 
 # [핵심] 로컬 코드처럼 최대 10,000개까지 넉넉하게 수집
 ITER_LIMIT = 10000 
@@ -354,10 +356,16 @@ async def main():
     summary_queue = []
     
     backfill_window = parse_backfill_window()
+    ignore_existing_for_backfill = (
+        BACKFILL_IGNORE_EXISTING in {"1", "true", "yes", "y"}
+        or (BACKFILL_IGNORE_EXISTING == "" and backfill_window is not None and OUTPUT_MODE == "local")
+    )
     if backfill_window:
         print(
             f"🔍 백필 스캔 시작 (기간: {backfill_window[0].date()} ~ {(backfill_window[1]-timedelta(seconds=1)).date()}, 최대 {ITER_LIMIT}개)..."
         )
+        if ignore_existing_for_backfill:
+            print("🧪 백필 모드: existing_ids 중복 차단을 무시하고 로컬 결과를 생성합니다.")
     else:
         print(f"🔍 스캔 시작 (기준 ID > {last_id}, 최대 {ITER_LIMIT}개)...")
     
@@ -392,7 +400,7 @@ async def main():
         kst_dt = msg.date.astimezone(ZoneInfo(TZ_NAME))
         date_str = kst_dt.strftime("%Y-%m-%d")
         
-        if msg.id in existing_ids:
+        if (not ignore_existing_for_backfill) and msg.id in existing_ids:
             continue
 
         row = {
