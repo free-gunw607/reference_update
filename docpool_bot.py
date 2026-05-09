@@ -378,11 +378,20 @@ def extract_title_from_summary_text(text):
 # =========================================================
 async def main():
     print("🚀 [소중한추억] 업데이트 봇 가동...")
-    print("🧪 TEST MODE: GSheet 미사용, 로컬 CSV만 저장")
+    
+    # 1. 시트 접속
+    try:
+        gc = get_gsheet_client()
+        ss = gc.open_by_key(GSHEET_ID)
+        ws = ss.worksheet(GSHEET_TAB)
+        state_ws = get_or_create_state_ws(ss)
+    except Exception as e:
+        print(f"❌ 구글 시트 에러: {e}")
+        return
 
-    # 테스트 모드에서는 시트/상태를 읽지 않는다.
-    sheet_last_id, state_last_id = 0, 0
-    existing_ids, last_row_num = set(), 0
+    # 2. 시트 정보 로드
+    sheet_last_id, existing_ids, last_row_num = fetch_sheet_info(ws)
+    state_last_id = load_state_last_id(state_ws)
 
     # 3. 텔레그램 접속
     client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
@@ -481,10 +490,26 @@ async def main():
 
     print(f"📤 {len(upload_data)}건 업로드 준비 중...")
     
-    # 6. 로컬저장만 수행 (TEST MODE)
+    # 6. 업로드/로컬저장 & 알림
     try:
-        save_local_output(upload_data)
-        print("✅ 테스트 완료: 로컬 CSV 저장만 수행 (GSheet/State/알림 미수행)")
+        if OUTPUT_MODE == "local":
+            save_local_output(upload_data)
+            print("🧪 테스트 모드(local): GSheet 미반영, state 미업데이트")
+            print("🔕 테스트 모드(local): 텔레그램 알림 미전송")
+        else:
+            next_row = last_row_num + 1
+            end_row = next_row + len(upload_data) - 1
+            cell_range = f"A{next_row}:E{end_row}"
+            ws.update(range_name=cell_range, values=upload_data, value_input_option="RAW")
+            print(f"✅ 시트 업데이트 완료! (범위: {cell_range})")
+            if sorted_rows:
+                max_seen = max(x["msg_id"] for x in sorted_rows)
+                save_state_last_id(state_ws, max_seen)
+                print(f"✅ state 업데이트 완료: {max_seen}")
+        
+        if OUTPUT_MODE != "local":
+            print("🔔 텔레그램 스마트 알림 전송 중...")
+            send_telegram_smart([[r[0], r[1], r[2], r[3]] for r in upload_data])
         
     except Exception as e:
         print(f"❌ 처리 중 에러 발생: {e}")
