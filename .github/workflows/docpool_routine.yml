@@ -29,6 +29,14 @@ on:
         description: "DOC_POOL backfill end date (YYYY-MM-DD, optional)"
         required: false
         type: string
+      docpool_output_mode:
+        description: "DOC_POOL output mode: gsheet or local"
+        required: true
+        default: gsheet
+        type: choice
+        options:
+          - gsheet
+          - local
 
 jobs:
   run_docpool:
@@ -54,9 +62,10 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DOCPOOL_BACKFILL_FROM: ${{ github.event.inputs.docpool_from }}
           DOCPOOL_BACKFILL_TO: ${{ github.event.inputs.docpool_to }}
+          DOCPOOL_OUTPUT_MODE: ${{ github.event.inputs.docpool_output_mode }}
         run: |
           echo "Inputs: run_docpool=${{ github.event.inputs.run_docpool }}, run_company_report=${{ github.event.inputs.run_company_report }}, run_papers=${{ github.event.inputs.run_papers }}"
-          echo "DOCPOOL backfill: FROM=${DOCPOOL_BACKFILL_FROM} TO=${DOCPOOL_BACKFILL_TO}"
+          echo "DOCPOOL backfill: FROM=${DOCPOOL_BACKFILL_FROM} TO=${DOCPOOL_BACKFILL_TO} MODE=${DOCPOOL_OUTPUT_MODE}"
           RUN_DOCPOOL="${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_docpool == 'true' }}"
           RUN_COMPANY="${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_company_report == 'true' }}"
           RUN_PAPERS="${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_papers == 'true' }}"
@@ -85,3 +94,11 @@ jobs:
           else
             echo "⏭️ 3. Papers 봇 스킵"
           fi
+
+      - name: Upload DocPool Local Outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docpool-local-output
+          path: docpool_outputs/*.csv
+          if-no-files-found: ignore
