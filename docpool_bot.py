@@ -344,6 +344,19 @@ def looks_like_summary_text(text):
     markers = ("핵심 요약", "투자의견", "목표주가", "작성일:", "제목:")
     return text.strip().startswith("**") or any(k in text for k in markers)
 
+
+def extract_title_from_summary_text(text):
+    if not text:
+        return ""
+    m = re.search(r'(?:^|\n)\s*제목:\s*(.+)', text)
+    if m:
+        return m.group(1).strip()
+    # 일부 포맷은 첫 줄 자체가 제목 성격일 수 있음
+    first = text.strip().splitlines()[0].strip() if text.strip() else ""
+    if first and len(first) <= 200:
+        return first
+    return ""
+
 # =========================================================
 # [메인] 실행 로직 (크롤링 메커니즘 유지: reverse=True, min_id)
 # =========================================================
@@ -439,6 +452,8 @@ async def main():
             if pdf_name:
                 message_cell = pdf_name
             summary_cell = body_raw
+            if not message_cell:
+                message_cell = extract_title_from_summary_text(body_raw)
 
         row = {
             "msg_id": msg.id,
@@ -478,6 +493,7 @@ async def main():
         if OUTPUT_MODE == "local":
             save_local_output(upload_data)
             print("🧪 테스트 모드(local): GSheet 미반영, state 미업데이트")
+            print("🔕 테스트 모드(local): 텔레그램 알림 미전송")
         else:
             next_row = last_row_num + 1
             end_row = next_row + len(upload_data) - 1
@@ -489,8 +505,9 @@ async def main():
                 save_state_last_id(state_ws, max_seen)
                 print(f"✅ state 업데이트 완료: {max_seen}")
         
-        print("🔔 텔레그램 스마트 알림 전송 중...")
-        send_telegram_smart([[r[0], r[1], r[2], r[3]] for r in upload_data])
+        if OUTPUT_MODE != "local":
+            print("🔔 텔레그램 스마트 알림 전송 중...")
+            send_telegram_smart([[r[0], r[1], r[2], r[3]] for r in upload_data])
         
     except Exception as e:
         print(f"❌ 처리 중 에러 발생: {e}")
