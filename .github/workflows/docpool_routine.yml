@@ -5,6 +5,30 @@ on:
     # 08:00, 13:00, 15:00, 18:00, 20:00 (KST)
     - cron: '0 4,6,9,11,23 * * *'
   workflow_dispatch:
+    inputs:
+      run_docpool:
+        description: "Run DOC_POOL bot"
+        required: true
+        default: true
+        type: boolean
+      run_company_report:
+        description: "Run company report bot (AI)"
+        required: true
+        default: true
+        type: boolean
+      run_papers:
+        description: "Run papers bot"
+        required: true
+        default: true
+        type: boolean
+      docpool_from:
+        description: "DOC_POOL backfill start date (YYYY-MM-DD, optional)"
+        required: false
+        type: string
+      docpool_to:
+        description: "DOC_POOL backfill end date (YYYY-MM-DD, optional)"
+        required: false
+        type: string
 
 jobs:
   run_docpool:
@@ -28,18 +52,36 @@ jobs:
           MY_CHAT_ID: ${{ secrets.MY_CHAT_ID }}
           # [추가] Gemini API 키 환경변수
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DOCPOOL_BACKFILL_FROM: ${{ github.event.inputs.docpool_from }}
+          DOCPOOL_BACKFILL_TO: ${{ github.event.inputs.docpool_to }}
         run: |
-          echo "🤖 1. 소중한추억 봇 실행 중..."
-          python docpool_bot.py || echo "⚠️ DocPool 실행 중 오류 발생 (무시하고 계속)"
+          echo "Inputs: run_docpool=${{ github.event.inputs.run_docpool }}, run_company_report=${{ github.event.inputs.run_company_report }}, run_papers=${{ github.event.inputs.run_papers }}"
+          echo "DOCPOOL backfill: FROM=${DOCPOOL_BACKFILL_FROM} TO=${DOCPOOL_BACKFILL_TO}"
+          RUN_DOCPOOL="${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_docpool == 'true' }}"
+          RUN_COMPANY="${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_company_report == 'true' }}"
+          RUN_PAPERS="${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_papers == 'true' }}"
+
+          if [ "$RUN_DOCPOOL" = "true" ]; then
+            echo "🤖 1. 소중한추억 봇 실행 중..."
+            python docpool_bot.py || echo "⚠️ DocPool 실행 중 오류 발생 (무시하고 계속)"
+          else
+            echo "⏭️ 1. 소중한추억 봇 스킵"
+          fi
           
           echo "--------------------------------"
           
-          echo "🤖 2. 주식 증권사 리포트 봇 (AI Trial) 실행 중..."
-          # [변경] 기존 봇 대신 AI 버전 실행!
-          # python company_report_bot.py  <-- 기존 봇 주석 처리
-          python company_report_bot_ai.py || echo "⚠️ Company Report(AI) 실행 중 오류 발생 (무시하고 계속)"
+          if [ "$RUN_COMPANY" = "true" ]; then
+            echo "🤖 2. 주식 증권사 리포트 봇 (AI Trial) 실행 중..."
+            python company_report_bot_ai.py || echo "⚠️ Company Report(AI) 실행 중 오류 발생 (무시하고 계속)"
+          else
+            echo "⏭️ 2. 주식 증권사 리포트 봇 스킵"
+          fi
           
           echo "--------------------------------"
           
-          echo "🤖 3. Papers 봇 실행 중..."
-          python papers_bot.py || echo "⚠️ Papers 실행 중 오류 발생"
+          if [ "$RUN_PAPERS" = "true" ]; then
+            echo "🤖 3. Papers 봇 실행 중..."
+            python papers_bot.py || echo "⚠️ Papers 실행 중 오류 발생"
+          else
+            echo "⏭️ 3. Papers 봇 스킵"
+          fi

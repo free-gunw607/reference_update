@@ -1,5 +1,5 @@
 import os, sys, re, json, asyncio, requests, time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -25,6 +25,8 @@ CHANNEL_URL = "https://t.me/DOC_POOL"
 GSHEET_ID = "19Q3KNbFu0ftr2hAqEdNwhf_UQvYXiXa2Vvk8lv9S6JY"
 GSHEET_TAB = "<데이터>소중한추억"
 TZ_NAME = "Asia/Seoul"
+BACKFILL_FROM = os.getenv("DOCPOOL_BACKFILL_FROM", "").strip()  # YYYY-MM-DD
+BACKFILL_TO = os.getenv("DOCPOOL_BACKFILL_TO", "").strip()      # YYYY-MM-DD
 
 # [핵심] 로컬 코드처럼 최대 10,000개까지 넉넉하게 수집
 ITER_LIMIT = 10000 
@@ -223,6 +225,27 @@ def choose_effective_start_id(sheet_last_id, state_last_id, latest_msg_id):
         return max(sane)
     return min(candidates)
 
+
+def parse_backfill_window():
+    if not BACKFILL_FROM:
+        return None
+    tz = ZoneInfo(TZ_NAME)
+    try:
+        start_local = datetime.fromisoformat(BACKFILL_FROM).replace(tzinfo=tz)
+    except ValueError:
+        print(f"⚠️ invalid DOCPOOL_BACKFILL_FROM={BACKFILL_FROM}, ignoring backfill")
+        return None
+
+    if BACKFILL_TO:
+        try:
+            end_local = datetime.fromisoformat(BACKFILL_TO).replace(tzinfo=tz) + timedelta(days=1)
+        except ValueError:
+            print(f"⚠️ invalid DOCPOOL_BACKFILL_TO={BACKFILL_TO}, using open-ended")
+            end_local = datetime.now(tz) + timedelta(minutes=1)
+    else:
+        end_local = datetime.now(tz) + timedelta(minutes=1)
+    return start_local, end_local
+
 def fetch_sheet_info(ws):
     try:
         vals = ws.get_all_values()
@@ -317,11 +340,31 @@ async def main():
     rows_dict = {} 
     summary_queue = []
     
-    print(f"🔍 스캔 시작 (기준 ID > {last_id}, 최대 {ITER_LIMIT}개)...")
+    backfill_window = parse_backfill_window()
+    if backfill_window:
+        print(
+            f"🔍 백필 스캔 시작 (기간: {backfill_window[0].date()} ~ {(backfill_window[1]-timedelta(seconds=1)).date()}, 최대 {ITER_LIMIT}개)..."
+        )
+    else:
+        print(f"🔍 스캔 시작 (기준 ID > {last_id}, 최대 {ITER_LIMIT}개)...")
     
     # 4. 수집 (기존 로직 유지: 과거->최신, min_id 사용)
     # [검증 완료] reverse=True를 사용하여 과거 메시지부터 순차적으로 가져오므로 데이터 누락 없음
-    async for msg in client.iter_messages(entity, min_id=last_id, limit=ITER_LIMIT, reverse=True):
+    iter_kwargs = dict(entity=entity, limit=ITER_LIMIT, reverse=True)
+    if backfill_window:
+        _, end_local = backfill_window
+        iter_kwargs["offset_date"] = end_local.astimezone(timezone.utc)
+    else:
+        iter_kwargs["min_id"] = last_id
+
+    async for msg in client.iter_messages(**iter_kwargs):
+        if backfill_window:
+            start_local, end_local = backfill_window
+            msg_local = msg.date.astimezone(ZoneInfo(TZ_NAME))
+            if msg_local >= end_local:
+                continue
+            if msg_local < start_local:
+                break
         text = normalize_leading(msg.message)
         urls = extract_all_urls(text, msg.entities, msg)
         
