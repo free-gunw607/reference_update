@@ -6,6 +6,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.types import MessageMediaDocument, MessageEntityUrl, MessageEntityTextUrl
 import gspread
+import pandas as pd
 from google.oauth2.service_account import Credentials
 
 # ==============================================================================
