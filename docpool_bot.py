@@ -159,6 +159,7 @@ def dedup_insert(row_dict, row):
     # 기존에 없거나, 현재 ID가 더 작으면(원본에 가까우면) 업데이트
     if (prev is None) or (row["msg_id"] < prev["msg_id"]):
         row_dict[key] = row
+    return key
 
 # =========================================================
 # [기능 3] 구글 시트 유틸 (빈 행 무시 + 전체 ID 스캔)
@@ -338,6 +339,13 @@ def extract_pdf_filename(msg, urls):
     return ""
 
 
+def is_pdf_document_message(msg):
+    if not isinstance(msg.media, MessageMediaDocument):
+        return False
+    mime = getattr(msg.media.document, "mime_type", "") or ""
+    return "pdf" in mime.lower()
+
+
 def looks_like_summary_text(text):
     if not text:
         return False
@@ -388,8 +396,7 @@ async def main():
     print(
         f"📊 시작 ID 결정 | sheet={sheet_last_id}, state={state_last_id}, latest={latest_msg_id} -> start={last_id}"
     )
-    rows_dict = {} 
-    summary_queue = []
+    rows_dict = {}
     
     backfill_window = parse_backfill_window()
     ignore_existing_for_backfill = (
@@ -427,10 +434,9 @@ async def main():
                 break
         text = normalize_leading(msg.message)
         urls = extract_all_urls(text, msg.entities, msg)
-        
-        if not is_pdf_message(text, urls, msg):
-            if text and ("핵심 요약" in text or text.startswith("**")):
-                summary_queue.append({"msg_id": msg.id, "text": text.strip()})
+
+        # 핵심 전환: A/B 번들 매칭 대신, 실제 PDF 첨부 메시지만 저장한다.
+        if not is_pdf_document_message(msg):
             continue
             
         tg_link = f"https://t.me/DOC_POOL/{msg.id}"
@@ -442,18 +448,9 @@ async def main():
         if (not ignore_existing_for_backfill) and msg.id in existing_ids:
             continue
 
-        is_summary_post = looks_like_summary_text(body_raw)
         pdf_name = extract_pdf_filename(msg, urls)
-        message_cell = body_raw
-        summary_cell = ""
-
-        # 최신 포맷: 한 메시지 안에 리포트 요약 본문이 포함되는 경우 분리 저장
-        if is_summary_post:
-            if pdf_name:
-                message_cell = pdf_name
-            summary_cell = body_raw
-            if not message_cell:
-                message_cell = extract_title_from_summary_text(body_raw)
+        message_cell = pdf_name or extract_title_from_summary_text(body_raw) or f"DOC_POOL_{msg.id}.pdf"
+        summary_cell = body_raw
 
         row = {
             "msg_id": msg.id,
@@ -462,9 +459,6 @@ async def main():
             "tg_link": tg_link,
             "summary": summary_cell,
         }
-        if (not row["summary"]) and summary_queue:
-            row["summary"] = summary_queue.pop(0)["text"]
-        
         dedup_insert(rows_dict, row)
         
         if len(rows_dict) % 50 == 0:
