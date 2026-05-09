@@ -29,6 +29,10 @@ on:
         description: "DOC_POOL backfill end date (YYYY-MM-DD, optional)"
         required: false
         type: string
+      docpool_start_id:
+        description: "DOC_POOL forced start message id (optional, e.g. 129063)"
+        required: false
+        type: string
       docpool_output_mode:
         description: "DOC_POOL output mode: gsheet or local"
         required: true
@@ -62,10 +66,11 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DOCPOOL_BACKFILL_FROM: ${{ github.event.inputs.docpool_from }}
           DOCPOOL_BACKFILL_TO: ${{ github.event.inputs.docpool_to }}
+          DOCPOOL_FORCE_START_ID: ${{ github.event.inputs.docpool_start_id }}
           DOCPOOL_OUTPUT_MODE: ${{ github.event.inputs.docpool_output_mode }}
         run: |
           echo "Inputs: run_docpool=${{ github.event.inputs.run_docpool }}, run_company_report=${{ github.event.inputs.run_company_report }}, run_papers=${{ github.event.inputs.run_papers }}"
-          echo "DOCPOOL backfill: FROM=${DOCPOOL_BACKFILL_FROM} TO=${DOCPOOL_BACKFILL_TO} MODE=${DOCPOOL_OUTPUT_MODE}"
+          echo "DOCPOOL backfill: FROM=${DOCPOOL_BACKFILL_FROM} TO=${DOCPOOL_BACKFILL_TO} START_ID=${DOCPOOL_FORCE_START_ID} MODE=${DOCPOOL_OUTPUT_MODE}"
           RUN_DOCPOOL="${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_docpool == 'true' }}"
           RUN_COMPANY="${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_company_report == 'true' }}"
           RUN_PAPERS="${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_papers == 'true' }}"

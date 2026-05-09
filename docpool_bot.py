@@ -30,6 +30,7 @@ TZ_NAME = "Asia/Seoul"
 BACKFILL_FROM = os.getenv("DOCPOOL_BACKFILL_FROM", "").strip()  # YYYY-MM-DD
 BACKFILL_TO = os.getenv("DOCPOOL_BACKFILL_TO", "").strip()      # YYYY-MM-DD
 OUTPUT_MODE = os.getenv("DOCPOOL_OUTPUT_MODE", "gsheet").strip().lower()  # gsheet | local
+FORCE_START_ID = os.getenv("DOCPOOL_FORCE_START_ID", "").strip()  # optional int
 # backfill에서 기존 시트 중복 차단을 무시할지 여부 (기본: local 모드 백필이면 True)
 BACKFILL_IGNORE_EXISTING = os.getenv("DOCPOOL_BACKFILL_IGNORE_EXISTING", "").strip().lower()
 
@@ -222,6 +223,13 @@ def save_state_last_id(state_ws, last_id):
 
 
 def choose_effective_start_id(sheet_last_id, state_last_id, latest_msg_id):
+    if FORCE_START_ID:
+        try:
+            forced = int(FORCE_START_ID)
+            if forced >= 0:
+                return forced
+        except ValueError:
+            print(f"⚠️ invalid DOCPOOL_FORCE_START_ID={FORCE_START_ID}, fallback to sheet/state")
     candidates = [x for x in (sheet_last_id, state_last_id) if isinstance(x, int) and x >= 0]
     if not candidates:
         return 0
