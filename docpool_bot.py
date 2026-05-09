@@ -374,6 +374,8 @@ async def main():
     iter_kwargs = dict(entity=entity, limit=ITER_LIMIT, reverse=True)
     if backfill_window:
         _, end_local = backfill_window
+        # 백필은 end 시점부터 과거로 내려가며(start 미만에서 중단) 수집해야 효율적이다.
+        iter_kwargs["reverse"] = False
         iter_kwargs["offset_date"] = end_local.astimezone(timezone.utc)
     else:
         iter_kwargs["min_id"] = last_id
