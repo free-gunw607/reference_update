@@ -4,7 +4,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telethon.tl.types import MessageMediaDocument, MessageEntityUrl, MessageEntityTextUrl
+from telethon.tl.types import MessageMediaDocument, MessageEntityUrl, MessageEntityTextUrl, DocumentAttributeFilename
 import gspread
 import pandas as pd
 from google.oauth2.service_account import Credentials
@@ -322,6 +322,28 @@ def is_pdf_message(msg_text, urls, msg):
         if "pdf" in mime.lower(): return True
     return False
 
+
+def extract_pdf_filename(msg, urls):
+    if isinstance(msg.media, MessageMediaDocument):
+        attrs = getattr(msg.media.document, "attributes", []) or []
+        for a in attrs:
+            if isinstance(a, DocumentAttributeFilename):
+                fn = (getattr(a, "file_name", "") or "").strip()
+                if fn:
+                    return fn
+    for u in urls:
+        m = re.search(r'/([^/?#]+\.pdf)(?:[?#].*)?$', u, re.I)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def looks_like_summary_text(text):
+    if not text:
+        return False
+    markers = ("핵심 요약", "투자의견", "목표주가", "작성일:", "제목:")
+    return text.strip().startswith("**") or any(k in text for k in markers)
+
 # =========================================================
 # [메인] 실행 로직 (크롤링 메커니즘 유지: reverse=True, min_id)
 # =========================================================
@@ -377,6 +399,7 @@ async def main():
         _, end_local = backfill_window
         # 백필은 end 시점부터 과거로 내려가며(start 미만에서 중단) 수집해야 효율적이다.
         iter_kwargs["reverse"] = False
+        iter_kwargs["limit"] = None
         iter_kwargs["offset_date"] = end_local.astimezone(timezone.utc)
     else:
         iter_kwargs["min_id"] = last_id
@@ -406,14 +429,25 @@ async def main():
         if (not ignore_existing_for_backfill) and msg.id in existing_ids:
             continue
 
+        is_summary_post = looks_like_summary_text(body_raw)
+        pdf_name = extract_pdf_filename(msg, urls)
+        message_cell = body_raw
+        summary_cell = ""
+
+        # 최신 포맷: 한 메시지 안에 리포트 요약 본문이 포함되는 경우 분리 저장
+        if is_summary_post:
+            if pdf_name:
+                message_cell = pdf_name
+            summary_cell = body_raw
+
         row = {
             "msg_id": msg.id,
             "date": date_str,
-            "message": body_raw,
+            "message": message_cell,
             "tg_link": tg_link,
-            "summary": "",
+            "summary": summary_cell,
         }
-        if summary_queue:
+        if (not row["summary"]) and summary_queue:
             row["summary"] = summary_queue.pop(0)["text"]
         
         dedup_insert(rows_dict, row)
