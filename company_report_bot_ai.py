@@ -31,6 +31,8 @@ STOCKINFO_RE = re.compile(r"https?://stockinfo7\.com/stock/report/url/(\d+)", re
 CONSENSUS_RE = re.compile(r"https?://consensus\.hankyung\.com/\S*?report_idx=(\d+)", re.I)
 URL_RE = re.compile(r'https?://\S+', re.I)
 LEADING_JUNK = re.compile(r'^[\u200B-\u200F\u202A-\u202E\u2060-\u2069\ufeff\s\r\n\t]+', re.S)
+STATE_TAB = "_state_companyreport"
+STATE_KEY = "last_id"
 
 try:
     TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
@@ -254,6 +256,44 @@ def find_last_data_row(vals):
             last = idx
     return last
 
+def get_or_create_state_ws(spreadsheet):
+    try:
+        return spreadsheet.worksheet(STATE_TAB)
+    except Exception:
+        return spreadsheet.add_worksheet(title=STATE_TAB, rows=20, cols=3)
+
+def load_state_last_id(state_ws):
+    try:
+        vals = state_ws.get_all_values()
+        for row in vals:
+            if len(row) >= 2 and row[0].strip() == STATE_KEY:
+                return int(row[1])
+    except Exception:
+        pass
+    return 0
+
+def save_state_last_id(state_ws, last_id):
+    now_str = datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y-%m-%d %H:%M:%S")
+    vals = state_ws.get_all_values()
+    target_row = None
+    for i, row in enumerate(vals, start=1):
+        if len(row) >= 1 and row[0].strip() == STATE_KEY:
+            target_row = i
+            break
+    if target_row is None:
+        target_row = 1
+    state_ws.update(
+        range_name=f"A{target_row}:C{target_row}",
+        values=[[STATE_KEY, str(int(last_id)), now_str]],
+        value_input_option="RAW",
+    )
+
+def choose_effective_start_id(sheet_last_id, state_last_id):
+    candidates = [x for x in (sheet_last_id, state_last_id) if isinstance(x, int) and x >= 0]
+    if not candidates:
+        return 0
+    return max(candidates)
+
 def fetch_sheet_info(ws):
     try:
         vals = ws.get_all_values()
@@ -320,13 +360,19 @@ async def main():
     
     try:
         gc = get_gsheet_client()
-        ws = gc.open_by_key(GSHEET_ID).worksheet(GSHEET_TAB)
+        ss = gc.open_by_key(GSHEET_ID)
+        ws = ss.worksheet(GSHEET_TAB)
+        state_ws = get_or_create_state_ws(ss)
     except Exception as e:
         print(f"❌ 시트 접속 에러: {e}")
         return
 
-    last_id, existing_ids, last_row_num = fetch_sheet_info(ws)
-    print(f"📊 기준 Report ID: {last_id}, 기존 DB: {len(existing_ids)}건")
+    sheet_last_id, existing_ids, last_row_num = fetch_sheet_info(ws)
+    state_last_id = load_state_last_id(state_ws)
+    last_id = choose_effective_start_id(sheet_last_id, state_last_id)
+    print(
+        f"📊 시작 ID 결정 | sheet={sheet_last_id}, state={state_last_id} -> start={last_id}"
+    )
 
     client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
     await client.connect()
@@ -415,6 +461,10 @@ async def main():
         
         ws.update(range_name=cell_range, values=upload_data, value_input_option="RAW")
         print(f"✅ 시트 저장 완료 (범위: {cell_range})")
+        if sorted_rows:
+            max_seen = max(x["rid"] for x in sorted_rows)
+            save_state_last_id(state_ws, max_seen)
+            print(f"✅ state 업데이트 완료: {max_seen}")
         
         send_telegram_smart(upload_data, ai_summary_text=ai_summary)
         

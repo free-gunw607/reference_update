@@ -29,8 +29,10 @@ ITER_LIMIT = 10000
 # 정규식
 URL_RE = re.compile(r'https?://\S+', re.I)
 # 로컬 코드의 ID 추출 정규식 활용
-ID_FROM_LINK_RE = re.compile(r'/(\d+)(?:\D*$|$)')
+TG_LINK_ID_RE = re.compile(r'https?://t\.me/DTpapers/(\d+)', re.I)
 LEADING_JUNK = re.compile(r'^[\u200B-\u200F\u202A-\u202E\u2060-\u2069\ufeff\s\r\n\t]+', re.S)
+STATE_TAB = "_state_papers"
+STATE_KEY = "last_id"
 
 try:
     TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
@@ -160,13 +162,10 @@ def is_pdf_message(msg):
     return False
 
 def extract_report_ids_from_text(text):
-    """시트 D열 링크에서 ID 추출 (t.me/DTpapers/1234)"""
-    if not text: return set()
-    ids = set()
-    # 로컬 코드의 정규식 활용
-    for m in ID_FROM_LINK_RE.finditer(str(text)):
-        ids.add(int(m.group(1)))
-    return ids
+    """시트 D열에서 Telegram deep-link ID만 추출"""
+    if not text:
+        return set()
+    return {int(x) for x in TG_LINK_ID_RE.findall(str(text))}
 
 # =========================================================
 # [기능 3] 구글 시트 유틸
@@ -185,6 +184,47 @@ def find_last_data_row(vals):
         if any((c or "").strip() for c in row[:4]):
             last = idx
     return last
+
+def get_or_create_state_ws(spreadsheet):
+    try:
+        return spreadsheet.worksheet(STATE_TAB)
+    except Exception:
+        return spreadsheet.add_worksheet(title=STATE_TAB, rows=20, cols=3)
+
+def load_state_last_id(state_ws):
+    try:
+        vals = state_ws.get_all_values()
+        for row in vals:
+            if len(row) >= 2 and row[0].strip() == STATE_KEY:
+                return int(row[1])
+    except Exception:
+        pass
+    return 0
+
+def save_state_last_id(state_ws, last_id):
+    now_str = datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y-%m-%d %H:%M:%S")
+    vals = state_ws.get_all_values()
+    target_row = None
+    for i, row in enumerate(vals, start=1):
+        if len(row) >= 1 and row[0].strip() == STATE_KEY:
+            target_row = i
+            break
+    if target_row is None:
+        target_row = 1
+    state_ws.update(
+        range_name=f"A{target_row}:C{target_row}",
+        values=[[STATE_KEY, str(int(last_id)), now_str]],
+        value_input_option="RAW",
+    )
+
+def choose_effective_start_id(sheet_last_id, state_last_id, latest_msg_id):
+    candidates = [x for x in (sheet_last_id, state_last_id) if isinstance(x, int) and x >= 0]
+    if not candidates:
+        return 0
+    sane = [x for x in candidates if x <= latest_msg_id + 1000]
+    if sane:
+        return max(sane)
+    return min(candidates)
 
 def fetch_sheet_info(ws):
     try:
@@ -215,18 +255,26 @@ async def main():
     
     try:
         gc = get_gsheet_client()
-        ws = gc.open_by_key(GSHEET_ID).worksheet(GSHEET_TAB)
+        ss = gc.open_by_key(GSHEET_ID)
+        ws = ss.worksheet(GSHEET_TAB)
+        state_ws = get_or_create_state_ws(ss)
     except Exception as e:
         print(f"❌ 구글 시트 에러: {e}")
         return
 
-    last_id, existing_ids, last_row_num = fetch_sheet_info(ws)
-    print(f"📊 시트 상태: Max ID={last_id}, 총 데이터={len(existing_ids)}건")
+    sheet_last_id, existing_ids, last_row_num = fetch_sheet_info(ws)
+    state_last_id = load_state_last_id(state_ws)
     
     client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
     await client.connect()
     
     entity = await client.get_entity(CHANNEL_URL)
+    latest = await client.get_messages(entity, limit=1)
+    latest_msg_id = latest[0].id if latest else 0
+    last_id = choose_effective_start_id(sheet_last_id, state_last_id, latest_msg_id)
+    print(
+        f"📊 시작 ID 결정 | sheet={sheet_last_id}, state={state_last_id}, latest={latest_msg_id} -> start={last_id}"
+    )
     # 중복 제거용 딕셔너리 (날짜+제목 기준)
     rows_dict = {} 
     
@@ -290,6 +338,10 @@ async def main():
         
         ws.update(range_name=cell_range, values=upload_data, value_input_option="RAW")
         print(f"✅ 시트 업데이트 완료! (범위: {cell_range})")
+        if sorted_rows:
+            max_seen = max(x["msg_id"] for x in sorted_rows)
+            save_state_last_id(state_ws, max_seen)
+            print(f"✅ state 업데이트 완료: {max_seen}")
         
         print("🔔 텔레그램 스마트 알림 전송 중...")
         send_telegram_smart(upload_data)

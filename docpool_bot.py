@@ -40,8 +40,11 @@ except:
 # 정규식
 URL_RE = re.compile(r'https?://\S+', re.I)
 PDF_URL_RE = re.compile(r'https?://\S+\.pdf(\b|$)', re.I)
-ID_RE = re.compile(r'(\d+)(?=(?:\.pdf\b|/?$))')
+TG_LINK_ID_RE = re.compile(r'https?://t\.me/DOC_POOL/(\d+)', re.I)
 LEADING_JUNK = re.compile(r'^[\u200B-\u200F\u202A-\u202E\u2060-\u2069\ufeff\s\r\n\t]+', re.S)
+
+STATE_TAB = "_state_docpool"
+STATE_KEY = "last_id"
 
 # =========================================================
 # [기능 1] 텔레그램 스마트 알림 (일정표 포함 + 꽉 채우기)
@@ -162,13 +165,10 @@ def get_gsheet_client():
     )
     return gspread.authorize(creds)
 
-def extract_report_ids_from_text(text):
-    if not text: return set()
-    ids = set()
-    for part in str(text).split(","):
-        m = ID_RE.search(part.strip())
-        if m: ids.add(int(m.group(1)))
-    return ids
+def extract_tg_message_ids_from_text(text):
+    if not text:
+        return set()
+    return {int(x) for x in TG_LINK_ID_RE.findall(str(text))}
 
 def find_last_data_row(vals):
     last = 0
@@ -176,6 +176,52 @@ def find_last_data_row(vals):
         if any((c or "").strip() for c in row[:4]):
             last = idx
     return last
+
+
+def get_or_create_state_ws(spreadsheet):
+    try:
+        return spreadsheet.worksheet(STATE_TAB)
+    except Exception:
+        return spreadsheet.add_worksheet(title=STATE_TAB, rows=20, cols=3)
+
+
+def load_state_last_id(state_ws):
+    try:
+        vals = state_ws.get_all_values()
+        for row in vals:
+            if len(row) >= 2 and row[0].strip() == STATE_KEY:
+                return int(row[1])
+    except Exception:
+        pass
+    return 0
+
+
+def save_state_last_id(state_ws, last_id):
+    now_str = datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y-%m-%d %H:%M:%S")
+    vals = state_ws.get_all_values()
+    target_row = None
+    for i, row in enumerate(vals, start=1):
+        if len(row) >= 1 and row[0].strip() == STATE_KEY:
+            target_row = i
+            break
+    if target_row is None:
+        target_row = 1
+    state_ws.update(
+        range_name=f"A{target_row}:C{target_row}",
+        values=[[STATE_KEY, str(int(last_id)), now_str]],
+        value_input_option="RAW",
+    )
+
+
+def choose_effective_start_id(sheet_last_id, state_last_id, latest_msg_id):
+    candidates = [x for x in (sheet_last_id, state_last_id) if isinstance(x, int) and x >= 0]
+    if not candidates:
+        return 0
+    # Drop suspicious IDs far above current channel ID.
+    sane = [x for x in candidates if x <= latest_msg_id + 1000]
+    if sane:
+        return max(sane)
+    return min(candidates)
 
 def fetch_sheet_info(ws):
     try:
@@ -189,7 +235,7 @@ def fetch_sheet_info(ws):
         for i in range(1, last_row_idx):
             row = vals[i]
             if len(row) > 3:
-                ids = extract_report_ids_from_text(row[3])
+                ids = extract_tg_message_ids_from_text(row[3])
                 if ids:
                     existing_ids.update(ids)
                     max_id = max(max_id, max(ids))
@@ -246,21 +292,30 @@ async def main():
     # 1. 시트 접속
     try:
         gc = get_gsheet_client()
-        ws = gc.open_by_key(GSHEET_ID).worksheet(GSHEET_TAB)
+        ss = gc.open_by_key(GSHEET_ID)
+        ws = ss.worksheet(GSHEET_TAB)
+        state_ws = get_or_create_state_ws(ss)
     except Exception as e:
         print(f"❌ 구글 시트 에러: {e}")
         return
 
     # 2. 시트 정보 로드
-    last_id, existing_ids, last_row_num = fetch_sheet_info(ws)
-    print(f"📊 시트 상태: Max ID={last_id}, 총 데이터={len(existing_ids)}건, 마지막 줄={last_row_num}")
+    sheet_last_id, existing_ids, last_row_num = fetch_sheet_info(ws)
+    state_last_id = load_state_last_id(state_ws)
 
     # 3. 텔레그램 접속
     client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
     await client.connect()
     
     entity = await client.get_entity(CHANNEL_URL)
+    latest = await client.get_messages(entity, limit=1)
+    latest_msg_id = latest[0].id if latest else 0
+    last_id = choose_effective_start_id(sheet_last_id, state_last_id, latest_msg_id)
+    print(
+        f"📊 시작 ID 결정 | sheet={sheet_last_id}, state={state_last_id}, latest={latest_msg_id} -> start={last_id}"
+    )
     rows_dict = {} 
+    summary_queue = []
     
     print(f"🔍 스캔 시작 (기준 ID > {last_id}, 최대 {ITER_LIMIT}개)...")
     
@@ -271,14 +326,11 @@ async def main():
         urls = extract_all_urls(text, msg.entities, msg)
         
         if not is_pdf_message(text, urls, msg):
+            if text and ("핵심 요약" in text or text.startswith("**")):
+                summary_queue.append({"msg_id": msg.id, "text": text.strip()})
             continue
             
         tg_link = f"https://t.me/DOC_POOL/{msg.id}"
-        pdf_urls = [u for u in urls if PDF_URL_RE.search(u)]
-        if pdf_urls:
-            links = ", ".join([tg_link] + pdf_urls)
-        else:
-            links = tg_link
             
         body_raw = strip_urls_from_text(text)
         kst_dt = msg.date.astimezone(ZoneInfo(TZ_NAME))
@@ -291,8 +343,11 @@ async def main():
             "msg_id": msg.id,
             "date": date_str,
             "message": body_raw,
-            "links": links,
+            "tg_link": tg_link,
+            "summary": "",
         }
+        if summary_queue:
+            row["summary"] = summary_queue.pop(0)["text"]
         
         dedup_insert(rows_dict, row)
         
@@ -307,7 +362,7 @@ async def main():
     # 업로드 포맷 변환
     upload_data = []
     for r in sorted_rows:
-        upload_data.append([r["date"], "", r["message"], r["links"]])
+        upload_data.append([r["date"], "", r["message"], r["tg_link"], r["summary"]])
 
     # [수정] 빈 결과 알림 전송 로직 추가
     if not upload_data:
@@ -321,13 +376,17 @@ async def main():
     try:
         next_row = last_row_num + 1
         end_row = next_row + len(upload_data) - 1
-        cell_range = f"A{next_row}:D{end_row}"
+        cell_range = f"A{next_row}:E{end_row}"
         
         ws.update(range_name=cell_range, values=upload_data, value_input_option="RAW")
         print(f"✅ 시트 업데이트 완료! (범위: {cell_range})")
+        if sorted_rows:
+            max_seen = max(x["msg_id"] for x in sorted_rows)
+            save_state_last_id(state_ws, max_seen)
+            print(f"✅ state 업데이트 완료: {max_seen}")
         
         print("🔔 텔레그램 스마트 알림 전송 중...")
-        send_telegram_smart(upload_data)
+        send_telegram_smart([[r[0], r[1], r[2], r[3]] for r in upload_data])
         
     except Exception as e:
         print(f"❌ 처리 중 에러 발생: {e}")
