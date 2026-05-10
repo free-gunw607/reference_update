@@ -51,8 +51,7 @@ PDF_URL_RE = re.compile(r'https?://\S+\.pdf(\b|$)', re.I)
 TG_LINK_ID_RE = re.compile(r'https?://t\.me/DOC_POOL/(\d+)', re.I)
 LEADING_JUNK = re.compile(r'^[\u200B-\u200F\u202A-\u202E\u2060-\u2069\ufeff\s\r\n\t]+', re.S)
 
-STATE_TAB = "_state_docpool"
-STATE_KEY = "last_id"
+RUN_STATE_DIR = Path("run_state")
 
 # =========================================================
 # [기능 1] 텔레그램 스마트 알림 (일정표 포함 + 꽉 채우기)
@@ -187,50 +186,15 @@ def find_last_data_row(vals):
     return last
 
 
-def get_or_create_state_ws(spreadsheet):
-    try:
-        return spreadsheet.worksheet(STATE_TAB)
-    except Exception:
-        return spreadsheet.add_worksheet(title=STATE_TAB, rows=20, cols=3)
-
-
-def load_state_last_id(state_ws):
-    try:
-        vals = state_ws.get_all_values()
-        for row in vals:
-            if len(row) >= 2 and row[0].strip() == STATE_KEY:
-                return int(row[1])
-    except Exception:
-        pass
-    return 0
-
-
-def save_state_last_id(state_ws, last_id):
-    now_str = datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y-%m-%d %H:%M:%S")
-    vals = state_ws.get_all_values()
-    target_row = None
-    for i, row in enumerate(vals, start=1):
-        if len(row) >= 1 and row[0].strip() == STATE_KEY:
-            target_row = i
-            break
-    if target_row is None:
-        target_row = 1
-    state_ws.update(
-        range_name=f"A{target_row}:C{target_row}",
-        values=[[STATE_KEY, str(int(last_id)), now_str]],
-        value_input_option="RAW",
-    )
-
-
-def choose_effective_start_id(sheet_last_id, state_last_id, latest_msg_id):
+def choose_effective_start_id(sheet_last_id, latest_msg_id):
     if FORCE_START_ID:
         try:
             forced = int(FORCE_START_ID)
             if forced >= 0:
                 return forced
         except ValueError:
-            print(f"⚠️ invalid DOCPOOL_FORCE_START_ID={FORCE_START_ID}, fallback to sheet/state")
-    candidates = [x for x in (sheet_last_id, state_last_id) if isinstance(x, int) and x >= 0]
+            print(f"⚠️ invalid DOCPOOL_FORCE_START_ID={FORCE_START_ID}, fallback to sheet only")
+    candidates = [x for x in (sheet_last_id,) if isinstance(x, int) and x >= 0]
     if not candidates:
         return 0
     # Drop suspicious IDs far above current channel ID.
@@ -238,6 +202,14 @@ def choose_effective_start_id(sheet_last_id, state_last_id, latest_msg_id):
     if sane:
         return max(sane)
     return min(candidates)
+
+
+def write_run_state(payload):
+    RUN_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y%m%d_%H%M%S")
+    path = RUN_STATE_DIR / f"docpool_state_{ts}.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"🧾 런 상태 로그 저장: {path}")
 
 
 def parse_backfill_window():
@@ -416,14 +388,12 @@ async def main():
         gc = get_gsheet_client()
         ss = gc.open_by_key(GSHEET_ID)
         ws = ss.worksheet(GSHEET_TAB)
-        state_ws = get_or_create_state_ws(ss)
     except Exception as e:
         print(f"❌ 구글 시트 에러: {e}")
         return
 
     # 2. 시트 정보 로드
     sheet_last_id, existing_ids, last_row_num = fetch_sheet_info(ws)
-    state_last_id = load_state_last_id(state_ws)
 
     # 3. 텔레그램 접속
     client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
@@ -432,9 +402,9 @@ async def main():
     entity = await client.get_entity(CHANNEL_URL)
     latest = await client.get_messages(entity, limit=1)
     latest_msg_id = latest[0].id if latest else 0
-    last_id = choose_effective_start_id(sheet_last_id, state_last_id, latest_msg_id)
+    last_id = choose_effective_start_id(sheet_last_id, latest_msg_id)
     print(
-        f"📊 시작 ID 결정 | sheet={sheet_last_id}, state={state_last_id}, latest={latest_msg_id} -> start={last_id}"
+        f"📊 시작 ID 결정 | sheet={sheet_last_id}, latest={latest_msg_id} -> start={last_id}"
     )
     rows_dict = {}
     
@@ -580,6 +550,19 @@ async def main():
     # 7. 빈 결과 처리
     if not upload_data:
         print("💤 업데이트할 신규 데이터가 없습니다.")
+        write_run_state({
+            "bot": "docpool",
+            "mode": OUTPUT_MODE,
+            "timestamp_kst": datetime.now(ZoneInfo(TZ_NAME)).isoformat(),
+            "sheet_tab": GSHEET_TAB,
+            "sheet_last_id": sheet_last_id,
+            "latest_msg_id": latest_msg_id,
+            "start_id": last_id,
+            "new_rows": 0,
+            "max_seen_id": None,
+            "backfill_from": BACKFILL_FROM,
+            "backfill_to": BACKFILL_TO,
+        })
         send_telegram_smart([])
         return
 
@@ -589,7 +572,7 @@ async def main():
     try:
         if OUTPUT_MODE == "local":
             save_local_output(upload_data)
-            print("🧪 테스트 모드(local): GSheet 미반영, state 미업데이트")
+            print("🧪 테스트 모드(local): GSheet 미반영")
             print("🔕 테스트 모드(local): 텔레그램 알림 미전송")
         else:
             next_row = last_row_num + 1
@@ -597,10 +580,20 @@ async def main():
             cell_range = f"A{next_row}:E{end_row}"
             ws.update(range_name=cell_range, values=upload_data, value_input_option="RAW")
             print(f"✅ 시트 업데이트 완료! (범위: {cell_range})")
-            if sorted_rows:
-                max_seen = max(x["msg_id"] for x in sorted_rows)
-                save_state_last_id(state_ws, max_seen)
-                print(f"✅ state 업데이트 완료: {max_seen}")
+        max_seen = max(x["msg_id"] for x in sorted_rows) if sorted_rows else None
+        write_run_state({
+            "bot": "docpool",
+            "mode": OUTPUT_MODE,
+            "timestamp_kst": datetime.now(ZoneInfo(TZ_NAME)).isoformat(),
+            "sheet_tab": GSHEET_TAB,
+            "sheet_last_id": sheet_last_id,
+            "latest_msg_id": latest_msg_id,
+            "start_id": last_id,
+            "new_rows": len(upload_data),
+            "max_seen_id": max_seen,
+            "backfill_from": BACKFILL_FROM,
+            "backfill_to": BACKFILL_TO,
+        })
         
         if OUTPUT_MODE != "local":
             print("🔔 텔레그램 스마트 알림 전송 중...")

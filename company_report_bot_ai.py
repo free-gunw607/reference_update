@@ -1,6 +1,7 @@
 import os, sys, re, json, asyncio, requests, time
 import base64
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -31,8 +32,7 @@ STOCKINFO_RE = re.compile(r"https?://stockinfo7\.com/stock/report/url/(\d+)", re
 CONSENSUS_RE = re.compile(r"https?://consensus\.hankyung\.com/\S*?report_idx=(\d+)", re.I)
 URL_RE = re.compile(r'https?://\S+', re.I)
 LEADING_JUNK = re.compile(r'^[\u200B-\u200F\u202A-\u202E\u2060-\u2069\ufeff\s\r\n\t]+', re.S)
-STATE_TAB = "_state_companyreport"
-STATE_KEY = "last_id"
+RUN_STATE_DIR = Path("run_state")
 
 try:
     TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
@@ -256,43 +256,18 @@ def find_last_data_row(vals):
             last = idx
     return last
 
-def get_or_create_state_ws(spreadsheet):
-    try:
-        return spreadsheet.worksheet(STATE_TAB)
-    except Exception:
-        return spreadsheet.add_worksheet(title=STATE_TAB, rows=20, cols=3)
-
-def load_state_last_id(state_ws):
-    try:
-        vals = state_ws.get_all_values()
-        for row in vals:
-            if len(row) >= 2 and row[0].strip() == STATE_KEY:
-                return int(row[1])
-    except Exception:
-        pass
-    return 0
-
-def save_state_last_id(state_ws, last_id):
-    now_str = datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y-%m-%d %H:%M:%S")
-    vals = state_ws.get_all_values()
-    target_row = None
-    for i, row in enumerate(vals, start=1):
-        if len(row) >= 1 and row[0].strip() == STATE_KEY:
-            target_row = i
-            break
-    if target_row is None:
-        target_row = 1
-    state_ws.update(
-        range_name=f"A{target_row}:C{target_row}",
-        values=[[STATE_KEY, str(int(last_id)), now_str]],
-        value_input_option="RAW",
-    )
-
-def choose_effective_start_id(sheet_last_id, state_last_id):
-    candidates = [x for x in (sheet_last_id, state_last_id) if isinstance(x, int) and x >= 0]
+def choose_effective_start_id(sheet_last_id):
+    candidates = [x for x in (sheet_last_id,) if isinstance(x, int) and x >= 0]
     if not candidates:
         return 0
     return max(candidates)
+
+def write_run_state(payload):
+    RUN_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y%m%d_%H%M%S")
+    path = RUN_STATE_DIR / f"companyreport_state_{ts}.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"🧾 런 상태 로그 저장: {path}")
 
 def fetch_sheet_info(ws):
     try:
@@ -362,16 +337,14 @@ async def main():
         gc = get_gsheet_client()
         ss = gc.open_by_key(GSHEET_ID)
         ws = ss.worksheet(GSHEET_TAB)
-        state_ws = get_or_create_state_ws(ss)
     except Exception as e:
         print(f"❌ 시트 접속 에러: {e}")
         return
 
     sheet_last_id, existing_ids, last_row_num = fetch_sheet_info(ws)
-    state_last_id = load_state_last_id(state_ws)
-    last_id = choose_effective_start_id(sheet_last_id, state_last_id)
+    last_id = choose_effective_start_id(sheet_last_id)
     print(
-        f"📊 시작 ID 결정 | sheet={sheet_last_id}, state={state_last_id} -> start={last_id}"
+        f"📊 시작 ID 결정 | sheet={sheet_last_id} -> start={last_id}"
     )
 
     client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
@@ -437,6 +410,15 @@ async def main():
 
     if not upload_data:
         print("💤 신규 업데이트 없음.")
+        write_run_state({
+            "bot": "company_report_ai",
+            "timestamp_kst": datetime.now(ZoneInfo(TZ_NAME)).isoformat(),
+            "sheet_tab": GSHEET_TAB,
+            "sheet_last_id": sheet_last_id,
+            "start_id": last_id,
+            "new_rows": 0,
+            "max_seen_id": None,
+        })
         send_telegram_smart([])
         return
 
@@ -461,10 +443,17 @@ async def main():
         
         ws.update(range_name=cell_range, values=upload_data, value_input_option="RAW")
         print(f"✅ 시트 저장 완료 (범위: {cell_range})")
-        if sorted_rows:
-            max_seen = max(x["rid"] for x in sorted_rows)
-            save_state_last_id(state_ws, max_seen)
-            print(f"✅ state 업데이트 완료: {max_seen}")
+        max_seen = max(x["rid"] for x in sorted_rows) if sorted_rows else None
+        write_run_state({
+            "bot": "company_report_ai",
+            "timestamp_kst": datetime.now(ZoneInfo(TZ_NAME)).isoformat(),
+            "sheet_tab": GSHEET_TAB,
+            "sheet_last_id": sheet_last_id,
+            "start_id": last_id,
+            "new_rows": len(upload_data),
+            "max_seen_id": max_seen,
+            "ai_summary_generated": bool(ai_summary),
+        })
         
         send_telegram_smart(upload_data, ai_summary_text=ai_summary)
         

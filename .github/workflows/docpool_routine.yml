@@ -107,3 +107,14 @@ jobs:
           name: docpool-local-output
           path: docpool_outputs/*.csv
           if-no-files-found: ignore
+
+      - name: Upload Run State Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # 매 실행마다 봇 시작/종료 상태를 JSON으로 보관한다.
+          # 목적: GSheet state 탭 없이도 증분 시작점/신규 건수/최대 처리 ID를 사후 추적.
+          name: run-state-logs
+          path: run_state/*.json
+          if-no-files-found: ignore
+          retention-days: 90
