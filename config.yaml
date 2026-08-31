@@ -1,0 +1,58 @@
+# reference_update 전체 설정
+project:
+  name: reference_update
+  timezone: Asia/Seoul
+  schedule_hours: [8, 13, 15, 18, 20]
+
+google:
+  sheet_id: "19Q3KNbFu0ftr2hAqEdNwhf_UQvYXiXa2Vvk8lv9S6JY"
+  oauth_creds: "~/.config/gsheet-sync/refresh_token.json"
+  client_secret: "~/.config/gsheet-sync/client_secret.json"
+  drive_folder_id: "1lyLcfhjO0i9eXYlAONptRnAmXqfmApPI"
+
+telegram:
+  api_id: 23502096
+  api_hash: "99c1d3f16735873c768f0580a8a6ca58"
+  session_string_env: "DOCPOOL_SESSION_STRING"
+  bot_token_env: "BOT_TOKEN"
+  chat_id_env: "CHAT_ID"
+
+smtp:
+  host: "smtp.gmail.com"
+  port: 587
+  user_env: "SMTP_USER"
+  password_env: "SMTP_PASSWORD"
+  starttls: true
+
+email:
+  from_env: "EMAIL_FROM"
+  to_env: "EMAIL_TO"
+  subject_prefix: "[Reference]"
+
+bots:
+  docpool:
+    channel_url: "https://t.me/DOC_POOL"
+    sheet_tab: "<데이터>소중한추억"
+    iter_limit: 10000
+  papers:
+    channel_url: "https://t.me/DTpapers"
+    sheet_tab: "<데이터>Papers"
+    iter_limit: 10000
+  company_report:
+    channel_url: "https://t.me/companyreport"
+    sheet_tab: "<데이터>[주식] 증권사 리포트"
+    iter_limit: 10000
+  quick_report:
+    channel_url: "https://t.me/quick_report"
+    sheet_tab: "<데이터>Quick Report"
+    iter_limit: 10000
+  smic:
+    site_url: "http://snusmic.com/research/"
+    wp_api: "http://snusmic.com/wp-json/wp/v2/posts"
+    sheet_tab: "SMIC 리포트"
+    drive_folder_id: "1lyLcfhjO0i9eXYlAONptRnAmXqfmApPI"
+    max_pages: 8
+
+search_engine:
+  tab_name: "Search Engine"
+  status_cell: "H2"
