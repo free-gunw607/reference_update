@@ -112,18 +112,29 @@ def scrape_page_items_html(page_url):
 
 def scrape_smic_latest(max_pages):
     items = []
-    try:
-        for p in range(1, max_pages + 1):
+    empty_count = 0
+    for p in range(1, min(max_pages, 100) + 1):
+        try:
             page_items = scrape_page_items_api(page=p, per_page=30)
+        except Exception:
+            break
+        if not page_items:
+            empty_count += 1
+            if empty_count >= 2:
+                break
+            continue
+        empty_count = 0
+        items.extend(page_items)
+    if not items:
+        for p in range(1, min(max_pages, 100) + 1):
+            url = ROOT_URL if p == 1 else PAGE_URL.format(p)
+            try:
+                page_items = scrape_page_items_html(url)
+            except Exception:
+                break
             if not page_items:
                 break
             items.extend(page_items)
-    except Exception:
-        items = []
-    if not items:
-        for p in range(1, max_pages + 1):
-            url = ROOT_URL if p == 1 else PAGE_URL.format(p)
-            items.extend(scrape_page_items_html(url))
     dedup = {}
     for x in items:
         if x.article_url and x.article_url not in dedup:
@@ -184,7 +195,7 @@ def run():
                 drive_link = upload_pdf_to_drive(drive, x.pdf_url, x.publish_date, x.company_name, cfg.drive_folder_id)
                 uploaded += 1
             except Exception as e:
-                print(f"⚠️ Drive upload failed: {x.report_title} | {e}")
+                print(f"⚠️ Drive upload failed: {x.report_title[:40]} | {e}")
         links = drive_link or x.pdf_url or x.article_url
         note = f"{x.report_title} | {x.article_url}"
         main_rows.append([x.publish_date, "Equity Research", x.company_name, links, note])
@@ -196,8 +207,12 @@ def run():
 
     print(f"📤 Uploading {len(main_rows)} rows...")
     try:
-        ws.insert_rows(main_rows, row=2, value_input_option="RAW")
-        print(f"✅ Sheet updated: {len(main_rows)} rows inserted at row 2")
+        # Upload in batches to avoid API limits
+        BATCH = 100
+        for i in range(0, len(main_rows), BATCH):
+            batch = main_rows[i:i + BATCH]
+            ws.insert_rows(batch, row=2, value_input_option="RAW")
+            print(f"  Uploaded batch {i//BATCH + 1}: {len(batch)} rows")
 
         for x in new_items:
             vault.conn.execute(

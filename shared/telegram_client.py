@@ -3,6 +3,7 @@ from telethon.sessions import StringSession
 
 _client = None
 
+
 def get_client(cfg) -> TelegramClient:
     global _client
     if _client and _client.is_connected():
@@ -18,5 +19,5 @@ def get_client(cfg) -> TelegramClient:
 async def ensure_connected(cfg) -> TelegramClient:
     client = get_client(cfg)
     if not client.is_connected():
-        await client.connect()
+        await client.start()
     return client
