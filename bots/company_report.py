@@ -93,11 +93,10 @@ async def run():
         vals = ws.get_all_values()
         fallback_ids = set()
         for row in vals[1:]:
-            if len(row) > 2 and row[2]:
-                try:
-                    fallback_ids.add(int(row[2]))
-                except ValueError:
-                    pass
+            if len(row) > 3 and row[3]:
+                m = re.search(r"/url/(\d+)", row[3])
+                if m:
+                    fallback_ids.add(int(m.group(1)))
         sheet_last_id = max(fallback_ids) if fallback_ids else 0
 
     client = await ensure_connected(cfg)
