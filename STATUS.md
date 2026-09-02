@@ -43,3 +43,10 @@
 - Vault DB is not persisted between CI runs (bots read from sheet as fallback)
 - DOC_POOL bot scans from `start_id` based on sheet max ID (not vault state)
 - `GDRIVE_CREDS` and `GEMINI_API_KEY` secrets exist but are unused
+
+### Wisdomhouse Promotion
+
+- Episode: `EP-REFUP-20260902-01`
+- Knowledge IDs: `WH-REFUP-001` through `WH-REFUP-008`
+- Canonical document: [`by-repo/reference_update.md`](../../../agent-system/A2-workspace-memory/Wisdomhouse/by-repo/reference_update.md)
+- Promoted: 2026-09-02
