@@ -7,7 +7,7 @@ from shared.config import load_config
 from shared.vault import Vault
 from shared.gsheets import get_sheet
 from shared.telegram_client import ensure_connected
-from shared.notify import send_telegram_chunked, build_schedule_text
+from shared.notify import send_telegram_chunked, send_email, build_schedule_text
 
 STOCKINFO_RE = re.compile(r"https?://stockinfo7\.com/stock/report/url/(\d+)", re.I)
 CONSENSUS_RE = re.compile(r"https?://consensus\.hankyung\.com/\S*?report_idx=(\d+)", re.I)
@@ -177,6 +177,7 @@ async def run():
             disp = f"[{r['tag']}] {clean}" if r["tag"] else clean
             lines.append(f"{idx}. [{r['date']}] <a href='{r['link']}'>{disp}</a>")
         send_telegram_chunked(header + "\n".join(lines), cfg)
+        send_email("[Company Report] New PDFs", header + "\n".join(lines), cfg)
 
     except Exception as e:
         print(f"❌ Error: {e}")

@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 from shared.config import load_config
 from shared.vault import Vault
 from shared.gsheets import get_sheet, get_drive_service
-from shared.notify import send_telegram_chunked
+from shared.notify import send_telegram_chunked, send_email
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 ROOT_URL = "http://snusmic.com/research/"
@@ -226,6 +226,7 @@ def run():
         now = datetime.now(ZoneInfo(cfg.timezone))
         msg = f"📈 [{now.strftime('%m/%d %H:%M')}] SMIC Update\nNew: {len(main_rows)} items\nUploaded to Drive: {uploaded}"
         send_telegram_chunked(msg, cfg)
+        send_email("[SMIC] New Reports", msg, cfg)
 
     except Exception as e:
         print(f"❌ Error: {e}")

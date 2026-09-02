@@ -7,7 +7,7 @@ from shared.config import load_config
 from shared.vault import Vault
 from shared.gsheets import get_sheet
 from shared.telegram_client import ensure_connected
-from shared.notify import send_telegram_chunked, build_schedule_text
+from shared.notify import send_telegram_chunked, send_email, build_schedule_text
 
 URL_RE = re.compile(r"https?://\S+", re.I)
 LEADING_JUNK = re.compile(r"^[\u200B-\u200F\u202A-\u202E\u2060-\u2069\ufeff\s\r\n\t]+", re.S)
@@ -257,6 +257,7 @@ async def run():
             lines.append(f"{idx}. [{r['date']}] <a href='{link}'>{clean}</a>")
         body = header + "\n".join(lines)
         send_telegram_chunked(body, cfg)
+        send_email("[DOC_POOL] New PDFs", body, cfg)
 
     except Exception as e:
         print(f"❌ Error: {e}")
