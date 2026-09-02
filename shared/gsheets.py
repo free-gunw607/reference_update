@@ -1,10 +1,21 @@
-import json
+import json, os, tempfile
 from pathlib import Path
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 import gspread
 
 _creds_cache = None
+
+
+def _read_json_env_or_file(env_key: str, file_path: str) -> dict:
+    raw = os.environ.get(env_key, "")
+    if raw:
+        return json.loads(raw)
+    p = Path(file_path).expanduser()
+    if p.exists():
+        return json.loads(p.read_text(encoding="utf-8"))
+    return {}
+
 
 def get_credentials():
     global _creds_cache
@@ -14,12 +25,9 @@ def get_credentials():
     from shared.config import load_config
     cfg = load_config()
 
-    rt_path = Path(cfg.oauth_creds)
-    cs_path = Path(cfg.client_secret)
-
-    rt = json.loads(rt_path.read_text(encoding="utf-8"))
-    cs = json.loads(cs_path.read_text(encoding="utf-8"))
-    installed = cs.get("installed", {})
+    rt = _read_json_env_or_file("GOOGLE_REFRESH_TOKEN_JSON", cfg.oauth_creds)
+    cs = _read_json_env_or_file("GOOGLE_CLIENT_SECRET_JSON", cfg.client_secret)
+    installed = cs.get("installed", cs.get("web", {}))
 
     creds = Credentials(
         token=rt.get("token", ""),
