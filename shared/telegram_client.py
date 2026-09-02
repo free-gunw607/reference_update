@@ -21,3 +21,10 @@ async def ensure_connected(cfg) -> TelegramClient:
     if not client.is_connected():
         await client.start()
     return client
+
+
+async def disconnect_all():
+    global _client
+    if _client and _client.is_connected():
+        await _client.disconnect()
+    _client = None

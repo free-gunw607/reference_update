@@ -17,7 +17,11 @@ def run_bot(name: str):
     else:
         import importlib
         mod = importlib.import_module(f"bots.{name}")
+        import asyncio
         asyncio.run(mod.run())
+        # Disconnect any lingering Telegram clients
+        from shared.telegram_client import disconnect_all
+        asyncio.run(disconnect_all())
 
 
 def export_excel(vault, cfg):
