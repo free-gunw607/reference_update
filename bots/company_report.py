@@ -172,7 +172,7 @@ async def run():
         seq_title = f"{seq}회차" if seq > 0 else "수시"
         header = f"📈 [{time_tag} | {seq_title}] Company Report Update\nNew: {len(upload_data)} items\n{'=' * 20}\n[Schedule]\n{schedule_text}\n{'=' * 20}\n\n"
         lines = []
-        for idx, r in enumerate(sorted_rows[:30], 1):
+        for idx, r in enumerate(sorted_rows, 1):
             clean = r["message"][:35] + "..." if len(r["message"]) > 35 else r["message"]
             disp = f"[{r['tag']}] {clean}" if r["tag"] else clean
             lines.append(f"{idx}. [{r['date']}] <a href='{r['link']}'>{disp}</a>")

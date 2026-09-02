@@ -251,7 +251,7 @@ async def run():
         seq_title = f"{seq}회차" if seq > 0 else "수시"
         header = f"📚 [{time_tag} | {seq_title}] DOC_POOL Update\nNew: {len(upload_data)} items\n{'=' * 20}\n[Schedule]\n{schedule_text}\n{'=' * 20}\n\n"
         lines = []
-        for idx, r in enumerate(sorted_rows[:30], 1):
+        for idx, r in enumerate(sorted_rows, 1):
             clean = r["message"][:35] + "..." if len(r["message"]) > 35 else r["message"]
             link = r["tg_link"]
             lines.append(f"{idx}. [{r['date']}] <a href='{link}'>{clean}</a>")
