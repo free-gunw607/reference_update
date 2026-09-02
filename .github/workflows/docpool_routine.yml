@@ -1,120 +1,39 @@
-name: DocPool Update Bot
-#restart
+name: Reference Update Bots
 on:
   schedule:
-    # 08:00, 13:00, 15:00, 18:00, 20:00 (KST)
-    - cron: '0 4,6,9,11,23 * * *'
+    # 07:00, 08:00, 13:00, 15:00, 18:00, 20:00 (KST)
+    - cron: '0 4,6,9,11,22,23 * * *'
   workflow_dispatch:
     inputs:
-      run_docpool:
-        description: "Run DOC_POOL bot"
-        required: true
-        default: true
-        type: boolean
-      run_company_report:
-        description: "Run company report bot (AI)"
-        required: true
-        default: true
-        type: boolean
-      run_papers:
-        description: "Run papers bot"
-        required: true
-        default: true
-        type: boolean
-      docpool_from:
-        description: "DOC_POOL backfill start date (YYYY-MM-DD, optional)"
+      bots:
+        description: 'Comma-separated bots (docpool,papers,company_report,quick_report,smic)'
         required: false
-        type: string
-      docpool_to:
-        description: "DOC_POOL backfill end date (YYYY-MM-DD, optional)"
-        required: false
-        type: string
-      docpool_start_id:
-        description: "DOC_POOL forced start message id (optional, e.g. 129063)"
-        required: false
-        type: string
-      docpool_output_mode:
-        description: "DOC_POOL output mode: gsheet or local"
-        required: true
-        default: gsheet
-        type: choice
-        options:
-          - gsheet
-          - local
+        default: 'all'
 
 jobs:
-  run_docpool:
+  update:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-          
-      - name: Install dependencies
-        # google-generativeai 라이브러리가 설치되도록 requirements.txt 확인 필수!
-        run: pip install -r requirements.txt
-        
-      - name: Run Bots
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Run bots
         env:
-          GDRIVE_CREDS: ${{ secrets.GDRIVE_CREDS }}
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          MY_CHAT_ID: ${{ secrets.MY_CHAT_ID }}
-          # [추가] Gemini API 키 환경변수
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          DOCPOOL_BACKFILL_FROM: ${{ github.event.inputs.docpool_from }}
-          DOCPOOL_BACKFILL_TO: ${{ github.event.inputs.docpool_to }}
-          DOCPOOL_FORCE_START_ID: ${{ github.event.inputs.docpool_start_id }}
-          DOCPOOL_OUTPUT_MODE: ${{ github.event.inputs.docpool_output_mode }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          DOCPOOL_SESSION_STRING: ${{ secrets.DOCPOOL_SESSION_STRING }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_CLIENT_SECRET_JSON: ${{ secrets.GOOGLE_CLIENT_SECRET_JSON }}
+          GOOGLE_REFRESH_TOKEN_JSON: ${{ secrets.GOOGLE_REFRESH_TOKEN_JSON }}
         run: |
-          echo "Inputs: run_docpool=${{ github.event.inputs.run_docpool }}, run_company_report=${{ github.event.inputs.run_company_report }}, run_papers=${{ github.event.inputs.run_papers }}"
-          echo "DOCPOOL backfill: FROM=${DOCPOOL_BACKFILL_FROM} TO=${DOCPOOL_BACKFILL_TO} START_ID=${DOCPOOL_FORCE_START_ID} MODE=${DOCPOOL_OUTPUT_MODE}"
-          RUN_DOCPOOL="${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_docpool == 'true' }}"
-          RUN_COMPANY="${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_company_report == 'true' }}"
-          RUN_PAPERS="${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_papers == 'true' }}"
-
-          if [ "$RUN_DOCPOOL" = "true" ]; then
-            echo "🤖 1. 소중한추억 봇 실행 중..."
-            python docpool_bot.py || echo "⚠️ DocPool 실행 중 오류 발생 (무시하고 계속)"
-          else
-            echo "⏭️ 1. 소중한추억 봇 스킵"
-          fi
-          
-          echo "--------------------------------"
-          
-          if [ "$RUN_COMPANY" = "true" ]; then
-            echo "🤖 2. 주식 증권사 리포트 봇 (AI Trial) 실행 중..."
-            python company_report_bot_ai.py || echo "⚠️ Company Report(AI) 실행 중 오류 발생 (무시하고 계속)"
-          else
-            echo "⏭️ 2. 주식 증권사 리포트 봇 스킵"
-          fi
-          
-          echo "--------------------------------"
-          
-          if [ "$RUN_PAPERS" = "true" ]; then
-            echo "🤖 3. Papers 봇 실행 중..."
-            python papers_bot.py || echo "⚠️ Papers 실행 중 오류 발생"
-          else
-            echo "⏭️ 3. Papers 봇 스킵"
-          fi
-
-      - name: Upload DocPool Local Outputs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: docpool-local-output
-          path: docpool_outputs/*.csv
-          if-no-files-found: ignore
-
-      - name: Upload Run State Logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          # 매 실행마다 봇 시작/종료 상태를 JSON으로 보관한다.
-          # 목적: GSheet state 탭 없이도 증분 시작점/신규 건수/최대 처리 ID를 사후 추적.
-          name: run-state-logs
-          path: run_state/*.json
-          if-no-files-found: ignore
-          retention-days: 90
+          BOTS="${{ github.event.inputs.bots || 'all' }}"
+          echo "🤖 Running bots: $BOTS"
+          python run_all.py --bots "$BOTS" --search-update --trigger cron
