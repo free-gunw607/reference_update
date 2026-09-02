@@ -89,6 +89,17 @@ async def run():
     state = vault.get_state("company_report")
     sheet_last_id = state.get("last_msg_id", 0)
 
+    if sheet_last_id == 0:
+        vals = ws.get_all_values()
+        fallback_ids = set()
+        for row in vals[1:]:
+            if len(row) > 2 and row[2]:
+                try:
+                    fallback_ids.add(int(row[2]))
+                except ValueError:
+                    pass
+        sheet_last_id = max(fallback_ids) if fallback_ids else 0
+
     client = await ensure_connected(cfg)
     entity = await client.get_entity(bc.channel_url)
 

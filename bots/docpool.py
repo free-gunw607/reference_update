@@ -133,10 +133,23 @@ async def run():
     state = vault.get_state("docpool")
     sheet_last_id = state.get("last_msg_id", 0)
 
+    ws = get_sheet(cfg.sheet_id, bc.sheet_tab)
+
     client = await ensure_connected(cfg)
     entity = await client.get_entity(bc.channel_url)
     latest_msgs = await client.get_messages(entity, limit=1)
     latest_msg_id = latest_msgs[0].id if latest_msgs else 0
+
+    # Read existing IDs from sheet as fallback when vault is empty
+    if sheet_last_id == 0:
+        vals = ws.get_all_values()
+        fallback_ids = set()
+        for row in vals[1:]:
+            if len(row) > 3 and row[3]:
+                m = re.search(r"t\.me/DOC_POOL/(\d+)", row[3])
+                if m:
+                    fallback_ids.add(int(m.group(1)))
+        sheet_last_id = max(fallback_ids) if fallback_ids else 0
 
     start_id = sheet_last_id if sheet_last_id > 0 else 0
     print(f"📊 start_id={start_id}, latest={latest_msg_id}")
