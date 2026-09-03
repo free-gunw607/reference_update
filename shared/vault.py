@@ -52,7 +52,9 @@ CREATE TABLE IF NOT EXISTS company_report_items (
     report_id INTEGER PRIMARY KEY,
     date TEXT,
     tag TEXT,
-    message TEXT,
+    company TEXT,
+    title TEXT,
+    summary TEXT,
     source_url TEXT,
     first_seen_at TEXT
 );
