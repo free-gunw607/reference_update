@@ -143,8 +143,8 @@ async def run():
         vals = ws.get_all_values()
         fallback_ids = set()
         for row in vals[1:]:
-            if len(row) > 6 and row[6]:
-                m = re.search(r"/url/(\d+)", row[6])
+            if len(row) > 4 and row[4]:
+                m = re.search(r"/url/(\d+)", row[4])
                 if m:
                     fallback_ids.add(int(m.group(1)))
         sheet_last_id = max(fallback_ids) if fallback_ids else 0
@@ -195,8 +195,7 @@ async def run():
 
     sorted_rows = sorted(rows_dict.values(), key=lambda r: r["rid"])
     upload_data = [[
-        r["date"], r["tag"], r["company"], r["title"], r["summary"],
-        str(r["rid"]), r["link"],
+        r["date"], r["tag"], r["title"], r["summary"], r["link"],
     ] for r in sorted_rows]
 
     if not upload_data:
@@ -209,19 +208,19 @@ async def run():
         vals = ws.get_all_values()
         last_row = 0
         for idx, row in enumerate(vals, 1):
-            if any((c or "").strip() for c in row[:7]):
+            if any((c or "").strip() for c in row[:5]):
                 last_row = idx
         next_row = last_row + 1
         end_row = next_row + len(upload_data) - 1
         ensure_sheet_capacity(ws, end_row)
-        ws.update(f"A{next_row}:G{end_row}", upload_data, value_input_option="RAW")
-        print(f"✅ Sheet updated: A{next_row}:G{end_row}")
+        ws.update(f"A{next_row}:E{end_row}", upload_data, value_input_option="RAW")
+        print(f"✅ Sheet updated: A{next_row}:E{end_row}")
 
         max_id = max(r["rid"] for r in sorted_rows)
         vault.set_state("company_report", max_id, sorted_rows[-1]["date"])
         items = [{"report_id": r["rid"], "date": r["date"], "tag": r["tag"],
-                  "company": r["company"], "title": r["title"],
-                  "summary": r["summary"], "source_url": r["link"]}
+                  "title": r["title"], "summary": r["summary"],
+                  "source_url": r["link"]}
                  for r in sorted_rows]
         vault.insert_items("company_report_items", items, "report_id")
         vault.finish_run(run_id, "ok", len(upload_data))
@@ -233,9 +232,8 @@ async def run():
         header = f"📈 [{time_tag} | {seq_title}] Company Report Update\nNew: {len(upload_data)} items\n{'=' * 20}\n[Schedule]\n{schedule_text}\n{'=' * 20}\n\n"
         lines = []
         for idx, r in enumerate(sorted_rows, 1):
-            company_tag = f"[{r['company']}] " if r["company"] else ""
             clean = r["title"][:35] + "..." if len(r["title"]) > 35 else r["title"]
-            disp = f"[{r['tag']}] {company_tag}{clean}" if r["tag"] else f"{company_tag}{clean}"
+            disp = f"[{r['tag']}] {clean}" if r["tag"] else clean
             lines.append(f"{idx}. [{r['date']}] <a href='{r['link']}'>{html_mod.escape(disp)}</a>")
         send_telegram_chunked(header + "\n".join(lines), cfg)
         send_email("[Company Report] New PDFs", header + "\n".join(lines), cfg)
