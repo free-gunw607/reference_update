@@ -60,3 +60,11 @@ def get_sheet(sheet_id: str, tab_name: str):
     gc = get_gspread_client()
     ss = gc.open_by_key(sheet_id)
     return ss.worksheet(tab_name)
+
+
+def ensure_sheet_capacity(ws, required_rows):
+    current = ws.row_count
+    if required_rows > current:
+        new_count = max(required_rows + 1000, int(current * 1.5))
+        ws.resize(rows=new_count)
+        print(f"📐 Sheet resized: {current} → {new_count} rows")

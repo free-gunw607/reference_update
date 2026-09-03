@@ -5,7 +5,7 @@ from telethon.tl.types import MessageEntityUrl, MessageEntityTextUrl
 
 from shared.config import load_config
 from shared.vault import Vault
-from shared.gsheets import get_sheet
+from shared.gsheets import get_sheet, ensure_sheet_capacity
 from shared.telegram_client import ensure_connected
 from shared.notify import send_telegram_chunked, send_email, build_schedule_text
 
@@ -156,6 +156,7 @@ async def run():
                 last_row = idx
         next_row = last_row + 1
         end_row = next_row + len(upload_data) - 1
+        ensure_sheet_capacity(ws, end_row)
         ws.update(f"A{next_row}:D{end_row}", upload_data, value_input_option="RAW")
         print(f"✅ Sheet updated: A{next_row}:D{end_row}")
 
