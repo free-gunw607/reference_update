@@ -207,12 +207,13 @@ def run():
 
     print(f"📤 Uploading {len(main_rows)} rows...")
     try:
-        # Upload in batches to avoid API limits
-        BATCH = 100
-        for i in range(0, len(main_rows), BATCH):
-            batch = main_rows[i:i + BATCH]
-            ws.insert_rows(batch, row=2, value_input_option="RAW")
-            print(f"  Uploaded batch {i//BATCH + 1}: {len(batch)} rows")
+        from shared.gsheets import ensure_sheet_capacity
+        end_row = last_row + len(main_rows)
+        ensure_sheet_capacity(ws, end_row)
+        start_row = last_row + 1
+        end_row = start_row + len(main_rows) - 1
+        ws.update(f"A{start_row}:E{end_row}", main_rows, value_input_option="RAW")
+        print(f"  ✅ Appended at rows {start_row}-{end_row}")
 
         for x in new_items:
             vault.conn.execute(

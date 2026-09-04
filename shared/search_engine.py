@@ -2,6 +2,22 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 
+def get_sheet_stats(sheet_id: str, sheet_tab: str) -> dict:
+    """Read row count and latest date directly from a Google Sheet tab."""
+    from shared.gsheets import get_sheet
+    ws = get_sheet(sheet_id, sheet_tab)
+    vals = ws.get_all_values()
+    data_rows = [row for row in vals[1:] if any((c or "").strip() for c in row)]
+    count = len(data_rows)
+    last_date = ""
+    for row in reversed(data_rows):
+        d = (row[0] if row else "").strip()
+        if d:
+            last_date = d
+            break
+    return {"count": count, "last_date": last_date, "ok": True}
+
+
 def update_status_panel(ws, sources: dict, tz_name: str = "Asia/Seoul"):
     now = datetime.now(ZoneInfo(tz_name)).strftime("%Y-%m-%d %H:%M")
     lines = ["레퍼런스 업데이트 현황", ""]

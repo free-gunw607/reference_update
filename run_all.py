@@ -7,7 +7,15 @@ from zoneinfo import ZoneInfo
 from shared.config import load_config
 from shared.vault import Vault
 from shared.gsheets import get_sheet
-from shared.search_engine import update_status_panel
+from shared.search_engine import update_status_panel, get_sheet_stats
+
+
+async def _run_and_disconnect(name: str):
+    import importlib
+    mod = importlib.import_module(f"bots.{name}")
+    await mod.run()
+    from shared.telegram_client import disconnect_all
+    await disconnect_all()
 
 
 def run_bot(name: str):
@@ -15,13 +23,7 @@ def run_bot(name: str):
         from bots.smic import run
         run()
     else:
-        import importlib
-        mod = importlib.import_module(f"bots.{name}")
-        import asyncio
-        asyncio.run(mod.run())
-        # Disconnect any lingering Telegram clients
-        from shared.telegram_client import disconnect_all
-        asyncio.run(disconnect_all())
+        asyncio.run(_run_and_disconnect(name))
 
 
 def export_excel(vault, cfg):
@@ -72,23 +74,27 @@ def export_excel(vault, cfg):
 def update_search_engine(cfg):
     try:
         ws = get_sheet(cfg.sheet_id, cfg.search_engine_tab)
-        vault = Vault(cfg.timezone)
-        stats = vault.get_all_source_stats()
         labels = {
             "docpool": "<데이터>소중한추억",
             "papers": "<데이터>Papers",
-            "company_report": "증권사 리포트",
-            "quick_report": "Quick Report",
+            "company_report": "<데이터>[주식] 증권사 리포트",
+            "quick_report": "<데이터>Quick Report",
             "smic": "SMIC 리포트",
         }
         sources = {}
-        for name, info in stats.items():
-            sources[name] = {
-                "tab": labels.get(name, name),
-                "last_date": info.get("last_date", "N/A"),
-                "count": info.get("count", 0),
-                "ok": info.get("ok", False),
-            }
+        for name, tab in labels.items():
+            try:
+                info = get_sheet_stats(cfg.sheet_id, tab)
+                sources[name] = {
+                    "tab": tab,
+                    "last_date": info.get("last_date", ""),
+                    "count": info.get("count", 0),
+                    "ok": True,
+                }
+            except Exception as e:
+                sources[name] = {
+                    "tab": tab, "last_date": "", "count": 0, "ok": False,
+                }
         update_status_panel(ws, sources, cfg.timezone)
         print("✅ Search Engine status panel updated")
     except Exception as e:
