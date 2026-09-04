@@ -95,7 +95,7 @@ async def run():
             rows_dict[key] = {"msg_id": msg.id, "date": date_str, "message": title, "links": tg_link}
 
     sorted_rows = sorted(rows_dict.values(), key=lambda r: (r["date"], r["msg_id"]))
-    upload_data = [[r["date"], "", r["message"], r["links"]] for r in sorted_rows]
+    upload_data = [[r["date"], "", r["message"], r["links"], ""] for r in sorted_rows]
 
     if not upload_data:
         print("💤 No new data")
@@ -107,13 +107,13 @@ async def run():
         vals = ws.get_all_values()
         last_row = 0
         for idx, row in enumerate(vals, 1):
-            if any((c or "").strip() for c in row[:4]):
+            if any((c or "").strip() for c in row[:5]):
                 last_row = idx
         next_row = last_row + 1
         end_row = next_row + len(upload_data) - 1
         ensure_sheet_capacity(ws, end_row)
-        ws.update(f"A{next_row}:D{end_row}", upload_data, value_input_option="RAW")
-        print(f"✅ Sheet updated: A{next_row}:D{end_row}")
+        ws.update(f"A{next_row}:E{end_row}", upload_data, value_input_option="RAW")
+        print(f"✅ Sheet updated: A{next_row}:E{end_row}")
 
         max_id = max(r["msg_id"] for r in sorted_rows)
         vault.set_state("papers", max_id, sorted_rows[-1]["date"])

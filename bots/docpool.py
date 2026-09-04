@@ -229,7 +229,7 @@ async def run():
         vals = ws.get_all_values()
         last_row = 0
         for idx, row in enumerate(vals, 1):
-            if any((c or "").strip() for c in row[:4]):
+            if any((c or "").strip() for c in row[:5]):
                 last_row = idx
         next_row = last_row + 1
         end_row = next_row + len(upload_data) - 1

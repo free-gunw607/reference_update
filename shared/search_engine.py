@@ -19,48 +19,94 @@ def get_sheet_stats(sheet_id: str, sheet_tab: str) -> dict:
 
 
 def update_status_panel(ws, sources: dict, tz_name: str = "Asia/Seoul"):
+    """Write structured monitoring table to H2:K9 of Search Engine tab."""
     now = datetime.now(ZoneInfo(tz_name)).strftime("%Y-%m-%d %H:%M")
-    lines = ["레퍼런스 업데이트 현황", ""]
     labels = {
         "docpool": "<데이터>소중한추억",
         "papers": "<데이터>Papers",
-        "company_report": "증권사 리포트",
-        "quick_report": "Quick Report",
+        "company_report": "<데이터>[주식] 증권사 리포트",
+        "quick_report": "<데이터>Quick Report",
         "smic": "SMIC 리포트",
     }
-    for i, (name, info) in enumerate(sources.items(), 1):
-        if info.get("paused"):
-            emoji = "Paused"
-        elif info.get("new"):
-            emoji = "NEW"
-        elif info.get("ok"):
-            emoji = "OK"
-        else:
-            emoji = "ERR"
+    rows = [
+        ["레퍼런스 업데이트 현황", "", "", ""],
+        ["소스", "최근 날짜", "상태", "행 수"],
+    ]
+    for name, info in sources.items():
         label = labels.get(name, name)
+        status = "OK" if info.get("ok") else "ERR"
         count = info.get("count", 0)
-        last = info.get("last_date", "N/A")
-        lines.append(f"<{i}> {label}: latest={last} | {emoji} | {count:,} rows")
-    lines.append(f"\nLast run: {now} KST")
-    ws.update("H2", [["\n".join(lines)]])
+        last = info.get("last_date", "")
+        rows.append([label, last, status, f"{count:,}"])
+    rows.append([f"마지막 실행: {now} KST", "", "", ""])
+
+    ws.update("H2:K10", rows, value_input_option="RAW")
 
 
-def search_keyword(ws, keyword: str) -> list:
-    all_vals = ws.batch_get(["A4:G50000"])[0]
+def search_keyword(ws, keyword: str = "", source: str = "",
+                   date_from: str = "", date_to: str = "") -> list:
+    """Search across all data rows in Search Engine tab with optional filters."""
+    all_vals = ws.batch_get(["A4:G100000"])[0]
     results = []
-    kw = keyword.lower()
+    kw = keyword.lower() if keyword else ""
     for row in all_vals:
-        row_text = " ".join(str(c) for c in row).lower()
-        if kw in row_text:
-            results.append({
-                "id": row[0] if len(row) > 0 else "",
-                "date": row[1] if len(row) > 1 else "",
-                "name": row[3] if len(row) > 3 else "",
-                "link": row[4] if len(row) > 4 else "",
-                "notes": row[5] if len(row) > 5 else "",
-                "source": row[6] if len(row) > 6 else "",
-            })
+        if not row or not any((c or "").strip() for c in row):
+            continue
+
+        row_source = row[6] if len(row) > 6 else ""
+        row_date = row[1] if len(row) > 1 else ""
+
+        # Source filter
+        if source and source not in (row_source or ""):
+            continue
+
+        # Date range filter
+        if date_from or date_to:
+            try:
+                dt = datetime.strptime(row_date, "%Y. %m. %d")
+                if date_from and dt < datetime.strptime(date_from, "%Y-%m-%d"):
+                    continue
+                if date_to and dt > datetime.strptime(date_to, "%Y-%m-%d"):
+                    continue
+            except (ValueError, TypeError):
+                if date_from or date_to:
+                    continue
+
+        # Keyword filter
+        if kw:
+            row_text = " ".join(str(c) for c in row).lower()
+            if kw not in row_text:
+                continue
+
+        results.append({
+            "id": row[0] if len(row) > 0 else "",
+            "date": row_date,
+            "classification": row[2] if len(row) > 2 else "",
+            "name": row[3] if len(row) > 3 else "",
+            "link": row[4] if len(row) > 4 else "",
+            "notes": row[5] if len(row) > 5 else "",
+            "source": row_source,
+        })
+
     return results
+
+
+def print_search_stats(results: list):
+    """Print search result statistics by source and date range."""
+    if not results:
+        print("  No results found.")
+        return
+
+    from collections import Counter
+    source_counts = Counter(r["source"] for r in results)
+    dates = [r["date"] for r in results if r["date"]]
+
+    print(f"\n  📊 Total: {len(results)} results")
+    print(f"  📁 By source:")
+    for src, cnt in source_counts.most_common():
+        print(f"    {src}: {cnt}")
+    if dates:
+        print(f"  📅 Date range: {min(dates)} ~ {max(dates)}")
 
 
 def extract_keywords(name: str) -> str:

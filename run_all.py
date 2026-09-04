@@ -101,25 +101,57 @@ def update_search_engine(cfg):
         print(f"⚠️ Search Engine update failed: {e}")
 
 
+def write_source_panels(cfg):
+    """Write monitoring panels to all source sheets."""
+    from shared.gsheets import write_source_panel
+    sources = [
+        ("<데이터>소중한추억", "https://t.me/DOC_POOL"),
+        ("<데이터>Papers", "https://t.me/DTpapers"),
+        ("<데이터>[주식] 증권사 리포트", "https://t.me/companyreport"),
+        ("<데이터>Quick Report", "https://t.me/quick_report"),
+        ("SMIC 리포트", "http://snusmic.com/research/"),
+    ]
+    for tab, url in sources:
+        try:
+            info = get_sheet_stats(cfg.sheet_id, tab)
+            ws = get_sheet(cfg.sheet_id, tab)
+            write_source_panel(ws, url, tab, info["last_date"], info["count"])
+            print(f"  ✅ {tab}: panel updated")
+        except Exception as e:
+            print(f"  ⚠️ {tab}: {e}")
+
+
+def build_search_engine(cfg):
+    """Refresh Search Engine data from all source sheets."""
+    from refresh_search_engine import run as refresh_run
+    refresh_run()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Reference Update Bot Runner")
     parser.add_argument("--bots", type=str, default="all",
                         help="Comma-separated bot names: docpool,papers,company_report,quick_report,smic")
     parser.add_argument("--excel", action="store_true", help="Export Excel after bot run")
     parser.add_argument("--search-update", action="store_true", help="Update Search Engine status panel")
+    parser.add_argument("--build-search", action="store_true", help="Rebuild Search Engine data from source sheets")
+    parser.add_argument("--source-panel", action="store_true", help="Write monitoring panels to source sheets")
     parser.add_argument("--search", type=str, help="Search keyword in Search Engine")
+    parser.add_argument("--source", type=str, help="Filter search by source tab")
+    parser.add_argument("--from", dest="date_from", type=str, help="Search start date YYYY-MM-DD")
+    parser.add_argument("--to", dest="date_to", type=str, help="Search end date YYYY-MM-DD")
     parser.add_argument("--trigger", type=str, default="cron", help="Trigger type: cron|manual|backfill")
     args = parser.parse_args()
 
     cfg = load_config()
 
     if args.search:
-        from shared.search_engine import search_keyword
+        from shared.search_engine import search_keyword, print_search_stats
         ws = get_sheet(cfg.sheet_id, cfg.search_engine_tab)
-        results = search_keyword(ws, args.search)
+        results = search_keyword(ws, args.search, args.source or "", args.date_from or "", args.date_to or "")
         print(f"🔍 Search '{args.search}': {len(results)} results")
-        for r in results[:20]:
-            print(f"  [{r['date']}] {r['name'][:50]} | {r['source']}")
+        for r in results[:30]:
+            print(f"  [{r['date']}] [{r['source'][:15]}] {r['name'][:50]}")
+        print_search_stats(results)
         return
 
     if args.bots == "all":
@@ -136,6 +168,12 @@ def main():
     if args.excel:
         vault = Vault(cfg.timezone)
         export_excel(vault, cfg)
+
+    if args.source_panel:
+        write_source_panels(cfg)
+
+    if args.build_search:
+        build_search_engine(cfg)
 
     if args.search_update or args.excel:
         update_search_engine(cfg)

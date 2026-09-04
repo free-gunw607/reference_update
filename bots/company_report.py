@@ -195,7 +195,7 @@ async def run():
 
     sorted_rows = sorted(rows_dict.values(), key=lambda r: r["rid"])
     upload_data = [[
-        r["date"], r["tag"], r["title"], r["summary"], r["link"],
+        r["date"], r["tag"], r["title"], r["link"], r["summary"],
     ] for r in sorted_rows]
 
     if not upload_data:

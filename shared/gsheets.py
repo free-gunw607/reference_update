@@ -68,3 +68,15 @@ def ensure_sheet_capacity(ws, required_rows):
         new_count = max(required_rows + 1000, int(current * 1.5))
         ws.resize(rows=new_count)
         print(f"📐 Sheet resized: {current} → {new_count} rows")
+
+
+def write_source_panel(ws, source_url, sheet_tab, last_date, count):
+    """Write metadata panel to columns G-H of a source sheet."""
+    panel = [
+        ["레퍼런스 소스 정보", ""],
+        ["소스", source_url],
+        ["시트 탭", sheet_tab],
+        ["최근 업데이트", last_date],
+        ["총 행 수", f"{count:,}"],
+    ]
+    ws.update("G2:H6", panel, value_input_option="RAW")
