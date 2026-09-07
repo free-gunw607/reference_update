@@ -19,21 +19,14 @@ def get_sheet_stats(sheet_id: str, sheet_tab: str) -> dict:
 
 
 def update_status_panel(ws, sources: dict, tz_name: str = "Asia/Seoul"):
-    """Write structured monitoring table to H2:K9 of Search Engine tab."""
+    """Write structured monitoring table to H2:K10 of Search Engine tab."""
     now = datetime.now(ZoneInfo(tz_name)).strftime("%Y-%m-%d %H:%M")
-    labels = {
-        "docpool": "<데이터>소중한추억",
-        "papers": "<데이터>Papers",
-        "company_report": "<데이터>[주식] 증권사 리포트",
-        "quick_report": "<데이터>Quick Report",
-        "smic": "SMIC 리포트",
-    }
     rows = [
         ["레퍼런스 업데이트 현황", "", "", ""],
         ["소스", "최근 날짜", "상태", "행 수"],
     ]
     for name, info in sources.items():
-        label = labels.get(name, name)
+        label = info.get("tab", name)
         status = "OK" if info.get("ok") else "ERR"
         count = info.get("count", 0)
         last = info.get("last_date", "")

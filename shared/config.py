@@ -11,6 +11,7 @@ def _env(key: str, default: str = "") -> str:
 class BotConfig:
     channel_url: str = ""
     sheet_tab: str = ""
+    source_url: str = ""
     iter_limit: int = 10000
 
 @dataclass
@@ -70,6 +71,7 @@ def load_config() -> Config:
         cfg.bots[name] = BotConfig(
             channel_url=bc.get("channel_url", ""),
             sheet_tab=bc.get("sheet_tab", ""),
+            source_url=bc.get("source_url", bc.get("channel_url", bc.get("site_url", ""))),
             iter_limit=int(bc.get("iter_limit", 10000)),
         )
     se = raw.get("search_engine", {})

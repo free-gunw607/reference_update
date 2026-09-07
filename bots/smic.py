@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 
 from shared.config import load_config
 from shared.vault import Vault
-from shared.gsheets import get_sheet, get_drive_service
+from shared.gsheets import get_sheet, get_drive_service, ensure_sheet_capacity, clip_text
 from shared.notify import send_telegram_chunked, send_email
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -198,7 +198,7 @@ def run():
                 print(f"⚠️ Drive upload failed: {x.report_title[:40]} | {e}")
         links = drive_link or x.pdf_url or x.article_url
         note = f"{x.report_title} | {x.article_url}"
-        main_rows.append([x.publish_date, "Equity Research", x.company_name, links, note])
+        main_rows.append([x.publish_date, "Equity Research", clip_text(x.company_name), links, clip_text(note)])
 
     if not main_rows:
         print("💤 No new data")

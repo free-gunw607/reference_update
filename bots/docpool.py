@@ -5,7 +5,7 @@ from telethon.tl.types import MessageMediaDocument, MessageEntityUrl, MessageEnt
 
 from shared.config import load_config
 from shared.vault import Vault
-from shared.gsheets import get_sheet, ensure_sheet_capacity
+from shared.gsheets import get_sheet, ensure_sheet_capacity, clip_text
 from shared.telegram_client import ensure_connected
 from shared.notify import send_telegram_chunked, send_email, build_schedule_text
 
@@ -217,7 +217,7 @@ async def run():
         print(f"✅ Summary filled: {filled}/{len(missing)}")
 
     sorted_rows = sorted(rows_dict.values(), key=lambda r: (r["date"], r["msg_id"]))
-    upload_data = [[r["date"], "", r["message"], r["tg_link"], r["summary"]] for r in sorted_rows]
+    upload_data = [[r["date"], "", clip_text(r["message"]), r["tg_link"], clip_text(r["summary"])] for r in sorted_rows]
 
     if not upload_data:
         print("💤 No new data")

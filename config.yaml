@@ -33,23 +33,28 @@ bots:
   docpool:
     channel_url: "https://t.me/DOC_POOL"
     sheet_tab: "<데이터>소중한추억"
+    source_url: "https://t.me/DOC_POOL"
     iter_limit: 10000
   papers:
     channel_url: "https://t.me/DTpapers"
     sheet_tab: "<데이터>Papers"
+    source_url: "https://t.me/DTpapers"
     iter_limit: 10000
   company_report:
     channel_url: "https://t.me/companyreport"
     sheet_tab: "<데이터>[주식] 증권사 리포트"
+    source_url: "https://t.me/companyreport"
     iter_limit: 10000
   quick_report:
     channel_url: "https://t.me/quick_report"
     sheet_tab: "<데이터>Quick Report"
+    source_url: "https://t.me/quick_report"
     iter_limit: 10000
   smic:
     site_url: "http://snusmic.com/research/"
     wp_api: "http://snusmic.com/wp-json/wp/v2/posts"
     sheet_tab: "SMIC 리포트"
+    source_url: "http://snusmic.com/research/"
     drive_folder_id: "1lyLcfhjO0i9eXYlAONptRnAmXqfmApPI"
     max_pages: 8
 

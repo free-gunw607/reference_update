@@ -74,15 +74,9 @@ def export_excel(vault, cfg):
 def update_search_engine(cfg):
     try:
         ws = get_sheet(cfg.sheet_id, cfg.search_engine_tab)
-        labels = {
-            "docpool": "<데이터>소중한추억",
-            "papers": "<데이터>Papers",
-            "company_report": "<데이터>[주식] 증권사 리포트",
-            "quick_report": "<데이터>Quick Report",
-            "smic": "SMIC 리포트",
-        }
         sources = {}
-        for name, tab in labels.items():
+        for name, bc in cfg.bots.items():
+            tab = bc.sheet_tab
             try:
                 info = get_sheet_stats(cfg.sheet_id, tab)
                 sources[name] = {
@@ -104,14 +98,9 @@ def update_search_engine(cfg):
 def write_source_panels(cfg):
     """Write monitoring panels to all source sheets."""
     from shared.gsheets import write_source_panel
-    sources = [
-        ("<데이터>소중한추억", "https://t.me/DOC_POOL"),
-        ("<데이터>Papers", "https://t.me/DTpapers"),
-        ("<데이터>[주식] 증권사 리포트", "https://t.me/companyreport"),
-        ("<데이터>Quick Report", "https://t.me/quick_report"),
-        ("SMIC 리포트", "http://snusmic.com/research/"),
-    ]
-    for tab, url in sources:
+    for name, bc in cfg.bots.items():
+        tab = bc.sheet_tab
+        url = bc.source_url or bc.channel_url or bc.site_url or ""
         try:
             info = get_sheet_stats(cfg.sheet_id, tab)
             ws = get_sheet(cfg.sheet_id, tab)

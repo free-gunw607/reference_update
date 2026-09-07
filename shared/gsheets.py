@@ -72,6 +72,8 @@ def ensure_sheet_capacity(ws, required_rows):
 
 def write_source_panel(ws, source_url, sheet_tab, last_date, count):
     """Write metadata panel to columns G-H of a source sheet."""
+    if ws.col_count < 8:
+        ws.resize(cols=8)
     panel = [
         ["레퍼런스 소스 정보", ""],
         ["소스", source_url],
@@ -80,3 +82,11 @@ def write_source_panel(ws, source_url, sheet_tab, last_date, count):
         ["총 행 수", f"{count:,}"],
     ]
     ws.update("G2:H6", panel, value_input_option="RAW")
+
+
+def clip_text(text, max_len=200):
+    """Clip text to max_len characters, adding ellipsis if truncated."""
+    s = (text or "").strip()
+    if len(s) <= max_len:
+        return s
+    return s[:max_len - 3] + "..."

@@ -5,7 +5,7 @@ from telethon.tl.types import MessageEntityUrl, MessageEntityTextUrl
 
 from shared.config import load_config
 from shared.vault import Vault
-from shared.gsheets import get_sheet, ensure_sheet_capacity
+from shared.gsheets import get_sheet, ensure_sheet_capacity, clip_text
 from shared.telegram_client import ensure_connected
 from shared.notify import send_telegram_chunked, send_email, build_schedule_text
 
@@ -193,9 +193,9 @@ async def run():
                 "link": target_link,
             }
 
-    sorted_rows = sorted(rows_dict.values(), key=lambda r: r["rid"])
+    sorted_rows = sorted(rows_dict.values(), key=lambda r: (r["date"], r["rid"]))
     upload_data = [[
-        r["date"], r["tag"], r["title"], r["link"], r["summary"],
+        r["date"], r["tag"], clip_text(r["title"]), r["link"], clip_text(r["summary"]),
     ] for r in sorted_rows]
 
     if not upload_data:
