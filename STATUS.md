@@ -1,6 +1,6 @@
 # STATUS.md
 
-> Last updated: 2026-09-02
+> Last updated: 2026-09-08
 
 ## Current State
 
@@ -38,8 +38,40 @@
 4. **Sheet dedup**: Cleaned up duplicate rows caused by initial `start_id=0` runs
 5. **DOC_POOL restore**: Restored 52,939 rows from vault + backup sheet after accidental clear
 
+### Critical Incident: Google OAuth Token Expiry (2026-09-07~08)
+
+- **증상**: 5개 봇 모두 `invalid_grant: Token has been expired or revoked` 에러로 완전 중단
+- **최초 실패**: 2026-09-07 13:22 UTC (KST 22:22)
+- **마지막 성공**: 2026-09-07 08:56 UTC (KST 17:56)
+- **원인**: Google Cloud 프로젝트 `smic-486312`의 OAuth consent screen이 "Testing" 모드 → refresh token이 7일 후 자동 만료됨
+- **근거**: 토큰 마지막 갱신 Aug 31 22:21 UTC → +6.6일 = Sep 7 13:22 UTC (정확히 만료)
+- **영향**: 시트 업로드, 텔레그램 알림, 이메일 알림 전부 중단 (3일간)
+- **즉시 조치**: 새 refresh token 발급 → 로컬 + CI 업데이트 (2026-09-08)
+- **근본 해결**: Service Account로 전환 (아래 계획 참조)
+- **WH 등록**: WH-REFUP-009
+
+### Service Account Migration Plan (2026-09-08)
+
+OAuth User → Service Account로 전환하여 토큰 만료 문제 영구 해결.
+
+| 단계 | 작업 | 파일 | 상태 |
+|------|------|------|------|
+| 1 | Service Account 생성 + JSON 키 다운로드 | `~/.config/gsheet-sync/service_account.json` | 예정 |
+| 2 | Google Sheet에 Service Account 권한 부여 (편집자) | Google Sheet 공유 설정 | 예정 |
+| 3 | `shared/gsheets.py` Service Account 인증으로 변경 | `shared/gsheets.py` | 예정 |
+| 4 | `shared/config.py`에 `service_account` 필드 추가 | `shared/config.py` | 예정 |
+| 5 | `config.yaml`에 `service_account` 경로 추가 | `config.yaml` | 예정 |
+| 6 | 매 10일 자동 체크 스크립트 생성 | `scripts/check_service_account.py` | 예정 |
+| 7 | 매 10일 CI workflow 생성 | `.github/workflows/service_account_check.yml` | 예정 |
+| 8 | 봇 구조 개선 (텔레그램 연결을 시트 연결보다 먼저) | `bots/*.py`, `run_all.py` | 예정 |
+
+**기대 효과**: 토큰 만료 없음 (90일 자동 갱신), 로컬/CI 독립 인증, 자동 알림
+
 ### Remaining Issues
 
+- Service Account 전환 미완료 (위 계획 참조)
+- 봇 구조 개선 미완료 (텔레그램 연결이 시트 연결보다 늦음 → 시트 실패 시 알림 불가)
+- 토큰 만료 알림 없음 (매 10일 자동 체크로 해결 예정)
 - Vault DB is not persisted between CI runs (bots read from sheet as fallback)
 - DOC_POOL bot scans from `start_id` based on sheet max ID (not vault state)
 - `GDRIVE_CREDS` and `GEMINI_API_KEY` secrets exist but are unused
