@@ -59,7 +59,12 @@ def get_drive_service():
 def get_sheet(sheet_id: str, tab_name: str):
     gc = get_gspread_client()
     ss = gc.open_by_key(sheet_id)
-    return ss.worksheet(tab_name)
+    try:
+        return ss.worksheet(tab_name)
+    except gspread.exceptions.WorksheetNotFound:
+        print(f"  Creating new tab: {tab_name}")
+        ws = ss.add_worksheet(title=tab_name, rows=1000, cols=10)
+        return ws
 
 
 def ensure_sheet_capacity(ws, required_rows):
