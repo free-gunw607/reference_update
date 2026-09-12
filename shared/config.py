@@ -37,6 +37,7 @@ class Config:
     email_subject_prefix: str = "[Reference]"
     bots: dict[str, BotConfig] = field(default_factory=dict)
     search_engine_tab: str = "Search Engine"
+    search_engine_tab_v2: str = "Search Engine v2"
     search_engine_cell: str = "H2"
 
 def load_config() -> Config:
@@ -76,5 +77,6 @@ def load_config() -> Config:
         )
     se = raw.get("search_engine", {})
     cfg.search_engine_tab = se.get("tab_name", "Search Engine")
+    cfg.search_engine_tab_v2 = se.get("tab_name_v2", "Search Engine v2")
     cfg.search_engine_cell = se.get("status_cell", "H2")
     return cfg

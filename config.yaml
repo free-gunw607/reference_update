@@ -60,4 +60,5 @@ bots:
 
 search_engine:
   tab_name: "Search Engine"
+  tab_name_v2: "Search Engine v2"
   status_cell: "H2"

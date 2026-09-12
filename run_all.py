@@ -116,6 +116,12 @@ def build_search_engine(cfg):
     refresh_run()
 
 
+def build_search_engine_v2(cfg):
+    """Refresh Search Engine v2 data from all source sheets with keyword indexing."""
+    from shared.search_engine import build_search_engine_v2
+    return build_search_engine_v2(cfg)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Reference Update Bot Runner")
     parser.add_argument("--bots", type=str, default="all",
@@ -123,12 +129,15 @@ def main():
     parser.add_argument("--excel", action="store_true", help="Export Excel after bot run")
     parser.add_argument("--search-update", action="store_true", help="Update Search Engine status panel")
     parser.add_argument("--build-search", action="store_true", help="Rebuild Search Engine data from source sheets")
+    parser.add_argument("--build-search-v2", action="store_true", help="Rebuild Search Engine v2 with keyword indexing")
     parser.add_argument("--source-panel", action="store_true", help="Write monitoring panels to source sheets")
     parser.add_argument("--search", type=str, help="Search keyword in Search Engine")
+    parser.add_argument("--search-v2", type=str, help="Search keyword in Search Engine v2")
     parser.add_argument("--source", type=str, help="Filter search by source tab")
     parser.add_argument("--from", dest="date_from", type=str, help="Search start date YYYY-MM-DD")
     parser.add_argument("--to", dest="date_to", type=str, help="Search end date YYYY-MM-DD")
     parser.add_argument("--trigger", type=str, default="cron", help="Trigger type: cron|manual|backfill")
+    parser.add_argument("--auto-search-v2", action="store_true", help="Auto-rebuild Search Engine v2 after bot run")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -140,6 +149,18 @@ def main():
         print(f"🔍 Search '{args.search}': {len(results)} results")
         for r in results[:30]:
             print(f"  [{r['date']}] [{r['source'][:15]}] {r['name'][:50]}")
+        print_search_stats(results)
+        return
+
+    if args.search_v2:
+        from shared.search_engine import search_keyword_v2, print_search_stats
+        ws = get_sheet(cfg.sheet_id, cfg.search_engine_tab_v2)
+        results = search_keyword_v2(ws, args.search_v2, args.source or "", args.date_from or "", args.date_to or "")
+        print(f"🔍 Search v2 '{args.search_v2}': {len(results)} results")
+        for r in results[:30]:
+            print(f"  [{r['date']}] [{r['source'][:15]}] {r['name'][:50]}")
+            if r.get('keywords'):
+                print(f"    Keywords: {r['keywords'][:60]}")
         print_search_stats(results)
         return
 
@@ -163,6 +184,9 @@ def main():
 
     if args.build_search:
         build_search_engine(cfg)
+
+    if args.build_search_v2 or args.auto_search_v2:
+        build_search_engine_v2(cfg)
 
     if args.search_update or args.excel:
         update_search_engine(cfg)

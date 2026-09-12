@@ -38,4 +38,4 @@ jobs:
         run: |
           BOTS="${{ github.event.inputs.bots || 'all' }}"
           echo "🤖 Running bots: $BOTS"
-          python run_all.py --bots "$BOTS" --search-update --source-panel --trigger cron
+          python run_all.py --bots "$BOTS" --search-update --source-panel --build-search-v2 --trigger cron
