@@ -347,6 +347,9 @@ def build_search_engine_v2(cfg) -> dict:
 
     # Write in batches of 20000
     BATCH = 20000
+    # Ensure sheet has enough rows
+    from shared.gsheets import ensure_sheet_capacity
+    ensure_sheet_capacity(se_ws, len(sheet_data) + 10)
     for i in range(0, len(sheet_data), BATCH):
         batch = sheet_data[i:i + BATCH]
         start_row = 3 + i
